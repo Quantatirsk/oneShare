@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+python-dotenv
+aiofiles
+aiosqlite
+websockets
+aiohttp
+openai

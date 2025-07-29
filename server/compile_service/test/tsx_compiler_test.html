@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSX 编译器测试页面</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/framer-motion@latest/dist/framer-motion.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-jsx.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+    <style>
+        .code-editor {
+            font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+        .iframe-container {
+            border: 2px solid #e5e7eb;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            background: white;
+        }
+        .loading-dots::after {
+            content: '';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+        .syntax-highlight {
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        pre[class*="language-"] {
+            margin: 0;
+            border-radius: 0;
+            font-size: 14px;
+        }
+        .code-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 头部 -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="w-full px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="code" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">TSX 编译器测试</h1>
+                        <p class="text-sm text-gray-600">React + TypeScript + JSX 在线编译与预览</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2 text-sm text-gray-500">
+                        <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span>API 连接正常</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容 -->
+    <main class="w-full p-6 space-y-6">
+        <!-- 控制面板 -->
+        <div class="bg-white rounded-xl shadow-sm border p-6">
+            <div class="flex flex-wrap items-center gap-4 mb-6">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i data-lucide="settings" class="w-5 h-5 mr-2"></i>
+                    编译配置
+                </h2>
+                
+
+                <!-- 基础编译配置 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <!-- 目标版本 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">目标版本</label>
+                        <select id="targetVersion" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                            <option value="es2020" selected>ES2020</option>
+                            <option value="es2021">ES2021</option>
+                            <option value="es2022">ES2022</option>
+                            <option value="esnext">ESNext</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 模块格式 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">模块格式</label>
+                        <select id="moduleFormat" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                            <option value="esm" selected>ESM</option>
+                            <option value="cjs">CommonJS</option>
+                            <option value="iife">IIFE</option>
+                        </select>
+                    </div>
+                    
+                    <!-- JSX 模式 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">JSX 模式</label>
+                        <select id="jsxMode" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                            <option value="automatic" selected>自动</option>
+                            <option value="react">React</option>
+                            <option value="react-jsx">React JSX</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 输出类型 -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">输出类型</label>
+                        <select id="outputType" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                            <option value="html" selected>HTML页面</option>
+                            <option value="js">JS模块</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 基础选项 -->
+                <div class="flex flex-wrap items-center gap-4 mb-4">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="minifyCode" class="text-blue-600">
+                        <span class="text-sm">压缩代码</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="showSourceMap" class="text-blue-600">
+                        <span class="text-sm">生成 Source Map</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="keepNames" class="text-blue-600" checked>
+                        <span class="text-sm">保持函数名</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="formatCode" class="text-blue-600" checked>
+                        <span class="text-sm">格式化代码</span>
+                    </label>
+                </div>
+
+                <!-- 可读性配置 -->
+                <div class="flex flex-wrap items-center gap-4 mb-4">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="preserveComments" class="text-blue-600" checked>
+                        <span class="text-sm">保留注释</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="preserveWhitespace" class="text-blue-600" checked>
+                        <span class="text-sm">保留空白</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="humanReadable" class="text-blue-600" checked>
+                        <span class="text-sm">人类可读</span>
+                    </label>
+                </div>
+
+                <!-- 自动修复配置 -->
+                <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                    <h4 class="text-sm font-medium text-gray-700 mb-3 flex items-center">
+                        <i data-lucide="wrench" class="w-4 h-4 mr-2"></i>
+                        自动修复选项
+                    </h4>
+                    <div class="flex flex-wrap items-center gap-4">
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="enableAutoFix" class="text-blue-600" checked>
+                            <span class="text-sm">启用 AST 自动修复</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="enableImportFix" class="text-blue-600">
+                            <span class="text-sm">启用导入修复</span>
+                        </label>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">修复尝试次数</label>
+                            <input type="number" id="autoFixAttempts" class="w-20 border border-gray-300 rounded-md px-2 py-1 text-sm" value="2" min="1" max="5">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 编译和配置按钮 -->
+                <div class="flex items-center space-x-3">
+                    <button id="compileBtn" class="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+                        <i data-lucide="play" class="w-4 h-4"></i>
+                        <span>编译预览</span>
+                    </button>
+                    <button id="resetConfig" class="flex items-center space-x-2 bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                        <span>重置配置</span>
+                    </button>
+                    <button id="saveConfig" class="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                        <i data-lucide="save" class="w-4 h-4"></i>
+                        <span>保存配置</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 文件上传区域 -->
+            <div class="flex items-center space-x-4">
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <i data-lucide="file-text" class="w-4 h-4 inline mr-1"></i>
+                        选择 TSX 文件或输入代码
+                    </label>
+                    <div class="flex space-x-2">
+                        <input type="file" id="tsxFile" accept=".tsx,.ts,.jsx,.js" class="hidden">
+                        <button onclick="document.getElementById('tsxFile').click()" class="flex items-center space-x-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg transition-colors">
+                            <i data-lucide="upload" class="w-4 h-4"></i>
+                            <span>上传文件</span>
+                        </button>
+                        <button id="loadExample" class="flex items-center space-x-2 bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg transition-colors">
+                            <i data-lucide="file-plus" class="w-4 h-4"></i>
+                            <span>加载示例</span>
+                        </button>
+                        <button id="clearCode" class="flex items-center space-x-2 bg-red-100 hover:bg-red-200 text-red-700 px-4 py-2 rounded-lg transition-colors">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            <span>清空</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 代码编辑和预览区域 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-280px)]">
+            <!-- 代码编辑区 -->
+            <div class="bg-white rounded-xl shadow-sm border flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b">
+                    <h3 class="font-semibold text-gray-900 flex items-center">
+                        <i data-lucide="code-2" class="w-5 h-5 mr-2"></i>
+                        TSX 代码编辑器
+                    </h3>
+                    <div class="flex items-center space-x-2">
+                        <span id="codeLength" class="text-xs text-gray-500">0 字符</span>
+                        <button id="formatCode" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded transition-colors">
+                            格式化
+                        </button>
+                    </div>
+                </div>
+                <div class="flex-1 relative">
+                    <textarea 
+                        id="codeEditor" 
+                        class="w-full h-full p-4 border-0 resize-none focus:outline-none focus:ring-0 code-editor text-sm"
+                        placeholder="在此输入您的 TSX 代码..."
+                        spellcheck="false"
+                    ></textarea>
+                </div>
+            </div>
+
+            <!-- 预览区域 -->
+            <div class="bg-white rounded-xl shadow-sm border flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b">
+                    <h3 class="font-semibold text-gray-900 flex items-center">
+                        <i data-lucide="monitor" class="w-5 h-5 mr-2"></i>
+                        实时预览
+                    </h3>
+                    <div class="flex items-center space-x-2">
+                        <div id="compilationStats" class="text-xs text-gray-500"></div>
+                        <button id="refreshPreview" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-600 px-2 py-1 rounded transition-colors">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex-1 relative">
+                    <!-- 单模式预览 -->
+                    <div id="singlePreview" class="w-full h-full">
+                        <iframe id="previewFrame" class="w-full h-full border-0" src="about:blank"></iframe>
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+
+        <!-- 编译结果和代码查看 -->
+        <div id="codeViewSection" class="bg-white rounded-xl shadow-sm border hidden">
+            <div class="flex items-center justify-between p-4 border-b">
+                <h3 class="font-semibold text-gray-900 flex items-center">
+                    <i data-lucide="file-code" class="w-5 h-5 mr-2"></i>
+                    编译结果
+                </h3>
+                <div class="flex items-center space-x-2">
+                    <button id="toggleCodeView" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1 rounded transition-colors">
+                        <i data-lucide="eye" class="w-4 h-4 inline mr-1"></i>
+                        显示代码
+                    </button>
+                    <button id="copyAllCode" class="text-sm bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1 rounded transition-colors">
+                        <i data-lucide="copy" class="w-4 h-4 inline mr-1"></i>
+                        复制全部
+                    </button>
+                </div>
+            </div>
+            <div id="codeDisplay" class="hidden">
+                <div class="p-4">
+                    <!-- 编译结果代码 -->
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-medium text-gray-700">编译后的 HTML</h4>
+                            <button onclick="copyToClipboard('compiledCode')" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded transition-colors">
+                                复制
+                            </button>
+                        </div>
+                        <div class="code-container">
+                            <pre><code id="compiledCode" class="language-html"></code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading 遮罩 -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-6 flex items-center space-x-4">
+            <div class="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <span class="text-gray-700 loading-dots">编译中</span>
+        </div>
+    </div>
+
+    <!-- 通知容器 -->
+    <div id="notification" class="fixed top-4 right-4 z-50"></div>
+
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+
+        // 默认示例代码
+        const DEFAULT_CODE = `import React, { useState } from 'react';
+import { Heart, Star, ThumbsUp, Sparkles } from 'lucide-react';
+
+export default function InteractiveDemo() {
+  const [count, setCount] = useState(0);
+  const [liked, setLiked] = useState(false);
+  const [rating, setRating] = useState(0);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 p-8">
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-8 border border-white/20">
+          <div className="text-center space-y-6">
+            <div className="flex items-center justify-center space-x-2 mb-6">
+              <Sparkles className="w-8 h-8 text-purple-500" />
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                React 交互演示
+              </h1>
+            </div>
+            
+            <div className="text-6xl font-bold text-indigo-600 mb-4">
+              {count}
+            </div>
+            
+            <div className="flex justify-center space-x-4 mb-8">
+              <button
+                onClick={() => setCount(count + 1)}
+                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 transform hover:scale-105 flex items-center space-x-2 shadow-lg"
+              >
+                <ThumbsUp size={20} />
+                <span>增加</span>
+              </button>
+              
+              <button
+                onClick={() => setCount(Math.max(0, count - 1))}
+                className="bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+              >
+                减少
+              </button>
+              
+              <button
+                onClick={() => setCount(0)}
+                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-6 py-3 rounded-lg font-medium transition-all duration-200 transform hover:scale-105 shadow-lg"
+              >
+                重置
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-center space-x-8">
+              <button
+                onClick={() => setLiked(!liked)}
+                className={\`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105 \${
+                  liked 
+                    ? 'bg-red-100 text-red-600 hover:bg-red-200' 
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }\`}
+              >
+                <Heart size={20} fill={liked ? 'currentColor' : 'none'} />
+                <span>{liked ? '已点赞' : '点赞'}</span>
+              </button>
+              
+              <div className="flex space-x-1">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    size={24}
+                    className={\`cursor-pointer transition-all duration-200 hover:scale-110 \${
+                      star <= rating ? 'text-yellow-400 fill-current' : 'text-gray-300 hover:text-yellow-200'
+                    }\`}
+                    onClick={() => setRating(star)}
+                  />
+                ))}
+              </div>
+            </div>
+            
+            {rating > 0 && (
+              <div className="mt-4 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                <p className="text-yellow-800">
+                  感谢您的 {rating} 星评价！⭐
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}`;
+
+        // 全局变量
+        let currentCompiledCode = '';
+
+        // DOM 元素
+        const codeEditor = document.getElementById('codeEditor');
+        const compileBtn = document.getElementById('compileBtn');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const previewFrame = document.getElementById('previewFrame');
+        const singlePreview = document.getElementById('singlePreview');
+        const codeViewSection = document.getElementById('codeViewSection');
+        const codeDisplay = document.getElementById('codeDisplay');
+        const toggleCodeView = document.getElementById('toggleCodeView');
+        const compilationStats = document.getElementById('compilationStats');
+        const codeLength = document.getElementById('codeLength');
+        const tsxFile = document.getElementById('tsxFile');
+        const loadExample = document.getElementById('loadExample');
+        const clearCode = document.getElementById('clearCode');
+
+        // 工具函数
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            const div = document.createElement('div');
+            const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';
+            
+            div.className = `${bgColor} text-white px-4 py-2 rounded-lg shadow-lg mb-2 transform transition-all duration-300 translate-x-full`;
+            div.textContent = message;
+            
+            notification.appendChild(div);
+            
+            // 触发动画
+            setTimeout(() => {
+                div.classList.remove('translate-x-full');
+            }, 10);
+            
+            // 自动移除
+            setTimeout(() => {
+                div.classList.add('translate-x-full');
+                setTimeout(() => {
+                    if (div.parentNode) {
+                        div.parentNode.removeChild(div);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        function updateCodeLength() {
+            const length = codeEditor.value.length;
+            codeLength.textContent = `${length} 字符`;
+        }
+
+
+        async function compileCode(code) {
+            const API_URL = 'http://localhost:8000/api/compile/';
+            
+            const options = {
+                // 基础编译选项
+                target: document.getElementById('targetVersion').value,
+                format: document.getElementById('moduleFormat').value,
+                jsx: document.getElementById('jsxMode').value,
+                outputType: document.getElementById('outputType').value,
+                minify: document.getElementById('minifyCode').checked,
+                sourceMap: document.getElementById('showSourceMap').checked,
+                
+                // 可读性配置
+                keepNames: document.getElementById('keepNames').checked,
+                formatCode: document.getElementById('formatCode').checked,
+                preserveComments: document.getElementById('preserveComments').checked,
+                preserveWhitespace: document.getElementById('preserveWhitespace').checked,
+                humanReadable: document.getElementById('humanReadable').checked,
+                htmlFormat: "esm",
+                
+                // 自动修复配置
+                enableAutoFix: document.getElementById('enableAutoFix').checked,
+                enableImportFix: document.getElementById('enableImportFix').checked,
+                autoFixAttempts: parseInt(document.getElementById('autoFixAttempts').value) || 2
+            };
+
+            // 创建 FormData 对象
+            const formData = new FormData();
+            
+            // 将数据作为独立的表单字段添加
+            formData.append('code', code);
+            
+            // 注意：libraries 和 options 必须被字符串化，以匹配后端的解析逻辑
+            formData.append('libraries', JSON.stringify(["react", "react-dom", "lucide-react"]));
+            formData.append('options', JSON.stringify(options));
+
+            // 发送新的、兼容的请求
+            // 注意：当使用 FormData 时，浏览器会自动设置正确的 Content-Type header，我们不需要手动指定它。
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                body: formData 
+            });
+
+            if (!response.ok) {
+                // 尝试解析错误响应体
+                try {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                } catch {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            }
+
+            return await response.json();
+        }
+
+        async function performCompilation() {
+            const code = codeEditor.value.trim();
+            if (!code) {
+                showNotification('请输入 TSX 代码', 'error');
+                return;
+            }
+
+            loadingOverlay.classList.remove('hidden');
+
+            try {
+                const startTime = Date.now();
+                const result = await compileCode(code);
+                const endTime = Date.now();
+                const totalTime = endTime - startTime;
+                
+                if (result.success) {
+                    const data = result.data;
+                    currentCompiledCode = data.outputType === 'html' ? data.htmlContent : data.compiledCode;
+                    
+                    // 显示预览
+                    if (data.outputType === 'html') {
+                        const blob = new Blob([data.htmlContent], { type: 'text/html' });
+                        previewFrame.src = URL.createObjectURL(blob);
+                    } else {
+                        // 对于JS输出，显示代码内容
+                        const htmlWrapper = `
+                        <html>
+                        <head>
+                            <title>JS输出预览</title>
+                            <style>body { font-family: monospace; padding: 20px; }</style>
+                        </head>
+                        <body>
+                            <h3>编译后的JavaScript代码:</h3>
+                            <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; overflow: auto;">${data.compiledCode}</pre>
+                        </body>
+                        </html>`;
+                        const blob = new Blob([htmlWrapper], { type: 'text/html' });
+                        previewFrame.src = URL.createObjectURL(blob);
+                    }
+                    
+                    // 构建统计信息
+                    let statsText = `编译完成 ${totalTime}ms | 大小: ${(currentCompiledCode.length/1024).toFixed(1)}KB`;
+                    
+                    // 添加自动修复信息
+                    if (data.autoFix && data.autoFix.applied) {
+                        statsText += ` | 修复: ${data.autoFix.fixesCount}个`;
+                    }
+                    
+                    // 添加缓存信息
+                    if (result.cached) {
+                        statsText += ' | 缓存命中';
+                    }
+                    
+                    compilationStats.textContent = statsText;
+                    
+                    // 显示详细信息
+                    displayCompilationDetails(result);
+                    
+                    codeViewSection.classList.remove('hidden');
+                    
+                    showNotification('编译成功！', 'success');
+                } else {
+                    throw new Error(result.error || '编译失败');
+                }
+                
+            } catch (error) {
+                console.error('编译错误:', error);
+                showNotification(`编译失败: ${error.message}`, 'error');
+                compilationStats.textContent = '编译失败';
+            } finally {
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification('代码已复制到剪贴板', 'success');
+            }).catch(() => {
+                showNotification('复制失败', 'error');
+            });
+        }
+
+        function displayCompilationDetails(result) {
+            // 创建或更新详细信息区域
+            let detailsSection = document.getElementById('compilationDetails');
+            if (!detailsSection) {
+                detailsSection = document.createElement('div');
+                detailsSection.id = 'compilationDetails';
+                detailsSection.className = 'mt-4 p-4 bg-gray-50 rounded-lg border';
+                
+                const codeViewSection = document.getElementById('codeViewSection');
+                const codeDisplay = document.getElementById('codeDisplay');
+                codeDisplay.appendChild(detailsSection);
+            }
+            
+            const data = result.data;
+            let detailsHTML = '<h5 class="text-sm font-medium text-gray-700 mb-3">编译详细信息</h5>';
+            
+            // 基础信息
+            detailsHTML += '<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-xs">';
+            detailsHTML += `<div><span class="font-medium">输出类型:</span> ${data.outputType}</div>`;
+            detailsHTML += `<div><span class="font-medium">内容哈希:</span> ${data.hash}</div>`;
+            detailsHTML += `<div><span class="font-medium">依赖数量:</span> ${data.dependencies.length}</div>`;
+            detailsHTML += `<div><span class="font-medium">缓存状态:</span> ${result.cached ? '命中' : '未命中'}</div>`;
+            detailsHTML += '</div>';
+            
+            // 依赖列表
+            if (data.dependencies.length > 0) {
+                detailsHTML += '<div class="mb-4">';
+                detailsHTML += '<span class="text-xs font-medium text-gray-700">依赖列表:</span>';
+                detailsHTML += '<div class="mt-1 flex flex-wrap gap-1">';
+                data.dependencies.forEach(dep => {
+                    detailsHTML += `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">${dep}</span>`;
+                });
+                detailsHTML += '</div></div>';
+            }
+            
+            // 自动修复信息
+            if (data.autoFix) {
+                detailsHTML += '<div class="mb-4 p-3 bg-white rounded border">';
+                detailsHTML += '<h6 class="text-xs font-medium text-gray-700 mb-2 flex items-center">';
+                detailsHTML += '<i data-lucide="wrench" class="w-3 h-3 mr-1"></i>自动修复信息</h6>';
+                
+                if (data.autoFix.applied) {
+                    detailsHTML += `<div class="text-xs text-green-600 mb-2">✓ 已应用 ${data.autoFix.fixesCount} 个修复</div>`;
+                    
+                    // 修复阶段
+                    if (data.autoFix.stages && data.autoFix.stages.length > 0) {
+                        detailsHTML += '<div class="space-y-1">';
+                        data.autoFix.stages.forEach(stage => {
+                            const statusIcon = stage.success ? '✓' : '✗';
+                            const statusColor = stage.success ? 'text-green-600' : 'text-red-600';
+                            detailsHTML += `<div class="text-xs ${statusColor}">${statusIcon} ${stage.stage}: ${stage.message}</div>`;
+                        });
+                        detailsHTML += '</div>';
+                    }
+                    
+                    // 修复详情
+                    if (data.autoFix.fixes && data.autoFix.fixes.length > 0) {
+                        detailsHTML += '<details class="mt-2"><summary class="text-xs cursor-pointer text-gray-600">查看修复详情</summary>';
+                        detailsHTML += '<div class="mt-2 space-y-1">';
+                        data.autoFix.fixes.forEach(fix => {
+                            detailsHTML += `<div class="text-xs bg-gray-100 p-2 rounded">${fix.type}: ${fix.description || fix.message}</div>`;
+                        });
+                        detailsHTML += '</div></details>';
+                    }
+                } else {
+                    detailsHTML += '<div class="text-xs text-gray-600">未应用自动修复</div>';
+                }
+                
+                // 警告信息
+                if (data.autoFix.warnings && data.autoFix.warnings.length > 0) {
+                    detailsHTML += '<div class="mt-2">';
+                    detailsHTML += '<span class="text-xs font-medium text-yellow-700">警告:</span>';
+                    data.autoFix.warnings.forEach(warning => {
+                        detailsHTML += `<div class="text-xs text-yellow-600">⚠ ${warning.message}</div>`;
+                    });
+                    detailsHTML += '</div>';
+                }
+                
+                detailsHTML += '</div>';
+            }
+            
+            // 性能信息
+            if (result.compile_time) {
+                detailsHTML += '<div class="text-xs text-gray-600">';
+                detailsHTML += `<span class="font-medium">编译时间:</span> ${result.compile_time.toFixed(3)}秒`;
+                if (result.cache_key) {
+                    detailsHTML += ` | <span class="font-medium">缓存键:</span> ${result.cache_key}`;
+                }
+                detailsHTML += '</div>';
+            }
+            
+            detailsSection.innerHTML = detailsHTML;
+            lucide.createIcons();
+        }
+
+        function resetConfiguration() {
+            // 重置所有配置到默认值
+            document.getElementById('targetVersion').value = 'es2020';
+            document.getElementById('moduleFormat').value = 'esm';
+            document.getElementById('jsxMode').value = 'automatic';
+            document.getElementById('outputType').value = 'html';
+            
+            document.getElementById('minifyCode').checked = false;
+            document.getElementById('showSourceMap').checked = false;
+            document.getElementById('keepNames').checked = true;
+            document.getElementById('formatCode').checked = true;
+            document.getElementById('preserveComments').checked = true;
+            document.getElementById('preserveWhitespace').checked = true;
+            document.getElementById('humanReadable').checked = true;
+            
+            document.getElementById('enableAutoFix').checked = true;
+            document.getElementById('enableImportFix').checked = false;
+            document.getElementById('autoFixAttempts').value = '2';
+            
+            showNotification('配置已重置为默认值', 'info');
+        }
+
+        function saveConfiguration() {
+            const config = {
+                target: document.getElementById('targetVersion').value,
+                format: document.getElementById('moduleFormat').value,
+                jsx: document.getElementById('jsxMode').value,
+                outputType: document.getElementById('outputType').value,
+                minify: document.getElementById('minifyCode').checked,
+                sourceMap: document.getElementById('showSourceMap').checked,
+                keepNames: document.getElementById('keepNames').checked,
+                formatCode: document.getElementById('formatCode').checked,
+                preserveComments: document.getElementById('preserveComments').checked,
+                preserveWhitespace: document.getElementById('preserveWhitespace').checked,
+                humanReadable: document.getElementById('humanReadable').checked,
+                enableAutoFix: document.getElementById('enableAutoFix').checked,
+                enableImportFix: document.getElementById('enableImportFix').checked,
+                autoFixAttempts: parseInt(document.getElementById('autoFixAttempts').value)
+            };
+            
+            localStorage.setItem('tsxCompilerConfig', JSON.stringify(config));
+            showNotification('配置已保存到本地存储', 'success');
+        }
+
+        function loadConfiguration() {
+            const saved = localStorage.getItem('tsxCompilerConfig');
+            if (saved) {
+                try {
+                    const config = JSON.parse(saved);
+                    
+                    document.getElementById('targetVersion').value = config.target || 'es2020';
+                    document.getElementById('moduleFormat').value = config.format || 'esm';
+                    document.getElementById('jsxMode').value = config.jsx || 'automatic';
+                    document.getElementById('outputType').value = config.outputType || 'html';
+                    
+                    document.getElementById('minifyCode').checked = config.minify || false;
+                    document.getElementById('showSourceMap').checked = config.sourceMap || false;
+                    document.getElementById('keepNames').checked = config.keepNames !== false;
+                    document.getElementById('formatCode').checked = config.formatCode !== false;
+                    document.getElementById('preserveComments').checked = config.preserveComments !== false;
+                    document.getElementById('preserveWhitespace').checked = config.preserveWhitespace !== false;
+                    document.getElementById('humanReadable').checked = config.humanReadable !== false;
+                    
+                    document.getElementById('enableAutoFix').checked = config.enableAutoFix !== false;
+                    document.getElementById('enableImportFix').checked = config.enableImportFix || false;
+                    document.getElementById('autoFixAttempts').value = config.autoFixAttempts || 2;
+                    
+                    showNotification('已加载保存的配置', 'success');
+                } catch (e) {
+                    console.error('加载配置失败:', e);
+                    showNotification('加载配置失败', 'error');
+                }
+            }
+        }
+
+        // 事件监听器
+        codeEditor.addEventListener('input', updateCodeLength);
+
+        compileBtn.addEventListener('click', performCompilation);
+
+        loadExample.addEventListener('click', () => {
+            codeEditor.value = DEFAULT_CODE;
+            updateCodeLength();
+            showNotification('示例代码已加载', 'success');
+        });
+
+        clearCode.addEventListener('click', () => {
+            codeEditor.value = '';
+            updateCodeLength();
+            showNotification('代码已清空', 'info');
+        });
+
+        tsxFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    codeEditor.value = e.target.result;
+                    updateCodeLength();
+                    showNotification(`文件 "${file.name}" 已加载`, 'success');
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        toggleCodeView.addEventListener('click', () => {
+            const isHidden = codeDisplay.classList.contains('hidden');
+            codeDisplay.classList.toggle('hidden');
+            
+            if (!isHidden) {
+                toggleCodeView.innerHTML = '<i data-lucide="eye" class="w-4 h-4 inline mr-1"></i>显示代码';
+            } else {
+                toggleCodeView.innerHTML = '<i data-lucide="eye-off" class="w-4 h-4 inline mr-1"></i>隐藏代码';
+                
+                // 更新代码显示
+                const compiledCodeElement = document.getElementById('compiledCode');
+                
+                if (currentCompiledCode) {
+                    compiledCodeElement.textContent = currentCompiledCode;
+                    Prism.highlightElement(compiledCodeElement);
+                }
+            }
+            
+            lucide.createIcons();
+        });
+
+        document.getElementById('copyAllCode').addEventListener('click', () => {
+            navigator.clipboard.writeText(currentCompiledCode).then(() => {
+                showNotification('代码已复制到剪贴板', 'success');
+            });
+        });
+
+        document.getElementById('refreshPreview').addEventListener('click', () => {
+            if (codeEditor.value.trim()) {
+                performCompilation();
+            }
+        });
+
+        document.getElementById('resetConfig').addEventListener('click', resetConfiguration);
+        document.getElementById('saveConfig').addEventListener('click', saveConfiguration);
+
+        // 初始化
+        codeEditor.value = DEFAULT_CODE;
+        updateCodeLength();
+        loadConfiguration(); // 加载保存的配置
+
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    performCompilation();
+                }
+            }
+        });
+
+        // 自动编译（可选）
+        let autoCompileTimeout;
+        codeEditor.addEventListener('input', () => {
+            clearTimeout(autoCompileTimeout);
+            autoCompileTimeout = setTimeout(() => {
+                if (codeEditor.value.trim() && codeEditor.value.length > 100) {
+                    // 只有代码足够长时才自动编译
+                    performCompilation();
+                }
+            }, 2000); // 2秒延迟
+        });
+
+        console.log('TSX 编译器测试页面已初始化');
+    </script>
+</body>
+</html>

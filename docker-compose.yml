@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: harbor.vect.one/quantatrisk/file-server:1.0
+    container_name: file-server
+    # privileged: true
+    ports:
+      - "8090:80"
+    volumes:
+      - ./server/storage:/app/storage
+      - ./server/shares.json:/app/shares.json
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai  # 设置时区为上海
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

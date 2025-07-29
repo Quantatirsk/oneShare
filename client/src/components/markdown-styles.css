@@ -1,0 +1,365 @@
+/* Markdown Preview Styles */
+
+/* 隐藏滚动条但保持滚动功能 */
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* 概览弹窗的Markdown样式 */
+.overview-markdown .wmde-markdown {
+  padding: 6px !important;
+  font-size: 1em !important;
+}
+
+.overview-markdown .wmde-markdown ul {
+  margin-top: 0.3em !important;
+  margin-bottom: 0.3em !important;
+  padding-left: 0.4em !important;
+}
+
+.overview-markdown .wmde-markdown ol {
+  margin-left: 0.4em !important;
+  margin-top: 0.3em !important;
+  margin-bottom: 0.3em !important;
+  padding-left: 0.4em !important;
+}
+
+.overview-markdown .wmde-markdown h1 {
+  font-size: 1.2em !important;
+  margin-top: 0.6em !important;
+  margin-bottom: 0.3em !important;
+  color: #222831 !important;
+}
+
+.overview-markdown .wmde-markdown h2 {
+  font-size: 1.1em !important;
+  margin-top: 0.6em !important;
+  margin-bottom: 0.3em !important;
+  color: #393E46 !important;
+}
+
+.overview-markdown .wmde-markdown h3 {
+  font-size: 1.1em !important;
+  margin-top: 0.6em !important;
+  margin-bottom: 0.3em !important;
+  color: #00ADB5 !important;
+}
+
+.overview-markdown .wmde-markdown h4 {
+  font-size: 1.05em !important;
+  margin-top: 0.6em !important;
+  margin-bottom: 0.3em !important;
+}
+
+.overview-markdown .wmde-markdown p {
+  margin-top: 0.6em !important;
+  margin-bottom: 0.6em !important;
+}
+
+.overview-markdown .wmde-markdown hr {
+  margin-top: 0.3em !important;
+  margin-bottom: 0.3em !important;
+}
+
+
+
+.markdown-viewer .w-md-editor-preview pre {
+  background-color: #f6f8fa !important;
+  border: 1px solid #d0d7de !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+}
+
+.markdown-viewer .w-md-editor-preview pre code {
+  background-color: transparent !important;
+  color: #24292f !important;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace !important;
+}
+
+.markdown-viewer .w-md-editor-preview code {
+  background-color: #f6f8fa !important;
+  color: #24292f !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  font-size: 0.875em !important;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace !important;
+  border: 1px solid #d0d7de !important;
+}
+
+/* Light theme syntax highlighting tokens */
+.markdown-viewer .w-md-editor-preview .token.comment,
+.markdown-viewer .w-md-editor-preview .token.prolog,
+.markdown-viewer .w-md-editor-preview .token.doctype,
+.markdown-viewer .w-md-editor-preview .token.cdata {
+  color: #6a737d !important;
+  font-style: italic !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.punctuation {
+  color: #24292f !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.property,
+.markdown-viewer .w-md-editor-preview .token.tag,
+.markdown-viewer .w-md-editor-preview .token.constant,
+.markdown-viewer .w-md-editor-preview .token.symbol,
+.markdown-viewer .w-md-editor-preview .token.deleted {
+  color: #cf222e !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.boolean,
+.markdown-viewer .w-md-editor-preview .token.number {
+  color: #0550ae !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.selector,
+.markdown-viewer .w-md-editor-preview .token.attr-name,
+.markdown-viewer .w-md-editor-preview .token.string,
+.markdown-viewer .w-md-editor-preview .token.char,
+.markdown-viewer .w-md-editor-preview .token.builtin,
+.markdown-viewer .w-md-editor-preview .token.inserted {
+  color: #0a3069 !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.operator,
+.markdown-viewer .w-md-editor-preview .token.entity,
+.markdown-viewer .w-md-editor-preview .token.url,
+.markdown-viewer .w-md-editor-preview .language-css .token.string,
+.markdown-viewer .w-md-editor-preview .style .token.string {
+  color: #0550ae !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.atrule,
+.markdown-viewer .w-md-editor-preview .token.attr-value,
+.markdown-viewer .w-md-editor-preview .token.keyword {
+  color: #cf222e !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.function,
+.markdown-viewer .w-md-editor-preview .token.class-name {
+  color: #8250df !important;
+}
+
+.markdown-viewer .w-md-editor-preview .token.regex,
+.markdown-viewer .w-md-editor-preview .token.important,
+.markdown-viewer .w-md-editor-preview .token.variable {
+  color: #e36209 !important;
+}
+
+/* Copy button styles for code blocks */
+.markdown-viewer .w-md-editor-preview .code-line {
+  position: relative;
+}
+
+.markdown-viewer .w-md-editor-preview .code-line:hover .copied {
+  visibility: visible;
+}
+
+.markdown-viewer .w-md-editor-preview .copied {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  visibility: hidden;
+  cursor: pointer;
+  background: var(--color-border-default, #d0d7de);
+  color: var(--color-fg-default, #24292f);
+  border-radius: 4px;
+  padding: 6px;
+  font-size: 12px;
+  transition: all 0.3s;
+  z-index: 10;
+}
+
+.markdown-viewer .w-md-editor-preview .copied .octicon-copy {
+  display: block;
+}
+
+.markdown-viewer .w-md-editor-preview .copied .octicon-check {
+  display: none;
+}
+
+.markdown-viewer .w-md-editor-preview .copied:hover {
+  background: var(--color-prettylights-syntax-entity-tag, #116329);
+  color: var(--color-canvas-default, #ffffff);
+}
+
+.markdown-viewer .w-md-editor-preview .copied:active,
+.markdown-viewer .w-md-editor-preview .copied.active {
+  background: var(--color-copied-active-bg, #2e9b33);
+  color: var(--color-canvas-default, #ffffff);
+}
+
+.markdown-viewer .w-md-editor-preview .copied.active .octicon-copy {
+  display: none;
+}
+
+.markdown-viewer .w-md-editor-preview .copied.active .octicon-check {
+  display: block;
+}
+
+/* Additional styling for better readability */
+.markdown-viewer .w-md-editor-preview h1,
+.markdown-viewer .w-md-editor-preview h2,
+.markdown-viewer .w-md-editor-preview h3,
+.markdown-viewer .w-md-editor-preview h4,
+.markdown-viewer .w-md-editor-preview h5,
+.markdown-viewer .w-md-editor-preview h6 {
+  color: hsl(var(--foreground)) !important;
+  margin-top: 1.5em !important;
+  margin-bottom: 0.5em !important;
+}
+
+.wmde-markdown h1 {
+  color: #00253c !important;
+}
+.wmde-markdown h2 {
+  color: #27374D !important;
+}
+
+.wmde-markdown h3 {
+  color: #526D82 !important;
+}
+
+.wmde-markdown .code-line {
+  color: #00253c !important;
+}
+
+.markdown-viewer .w-md-editor-preview p {
+  color: hsl(var(--foreground)) !important;
+  line-height: 1.6 !important;
+  margin-bottom: 1em !important;
+}
+
+.markdown-viewer .w-md-editor-preview blockquote {
+  border-left: 4px solid hsl(var(--primary)) !important;
+  background-color: hsl(var(--muted)) !important;
+  padding: 12px !important;
+  margin: 12px 0 !important;
+  border-radius: 6px !important;
+}
+
+.markdown-viewer .w-md-editor-preview table {
+  border-collapse: collapse !important;
+  width: 100% !important;
+  margin: 12px 0 !important;
+}
+
+.markdown-viewer .w-md-editor-preview th,
+.markdown-viewer .w-md-editor-preview td {
+  border: 1px solid hsl(var(--border)) !important;
+  padding: 8px 12px !important;
+  text-align: left !important;
+}
+
+.markdown-viewer .w-md-editor-preview th {
+  background-color: hsl(var(--muted)) !important;
+  font-weight: 600 !important;
+}
+
+/* 用户消息的markdown样式 - 针对深色背景 */
+.user-message-markdown .wmde-markdown {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.75rem !important; /* 12px - 与 text-xs 一致 */
+  padding: 0 !important;
+}
+
+.user-message-markdown .wmde-markdown h1 {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.9rem !important; /* 略大于基础字体 */
+  margin-top: 0.8em !important;
+  margin-bottom: 0.4em !important;
+  font-weight: 600 !important;
+}
+
+.user-message-markdown .wmde-markdown h2 {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.85rem !important;
+  margin-top: 0.8em !important;
+  margin-bottom: 0.4em !important;
+  font-weight: 600 !important;
+}
+
+.user-message-markdown .wmde-markdown h3,
+.user-message-markdown .wmde-markdown h4,
+.user-message-markdown .wmde-markdown h5,
+.user-message-markdown .wmde-markdown h6 {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.8rem !important;
+  margin-top: 0.8em !important;
+  margin-bottom: 0.4em !important;
+  font-weight: 600 !important;
+}
+
+.user-message-markdown .wmde-markdown p {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.75rem !important; /* 与基础字体大小一致 */
+  margin-top: 0.4em !important;
+  margin-bottom: 0.4em !important;
+}
+
+.user-message-markdown .wmde-markdown strong {
+  color: hsl(var(--primary-foreground)) !important;
+  font-weight: 600 !important;
+}
+
+.user-message-markdown .wmde-markdown em {
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.user-message-markdown .wmde-markdown ul,
+.user-message-markdown .wmde-markdown ol {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.75rem !important;
+  margin-top: 0.4em !important;
+  margin-bottom: 0.4em !important;
+  padding-left: 1em !important;
+}
+
+.user-message-markdown .wmde-markdown li {
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.75rem !important;
+}
+
+.user-message-markdown .wmde-markdown code {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  padding: 2px 4px !important;
+  border-radius: 3px !important;
+  font-size: 0.7rem !important; /* 略小于基础字体 */
+}
+
+.user-message-markdown .wmde-markdown pre {
+  background-color: rgba(0, 0, 0, 0.2) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  padding: 8px !important;
+  border-radius: 4px !important;
+  margin: 0.4em 0 !important;
+  font-size: 0.7rem !important; /* 略小于基础字体 */
+}
+
+.user-message-markdown .wmde-markdown pre code {
+  background-color: transparent !important;
+  color: hsl(var(--primary-foreground)) !important;
+  font-size: 0.7rem !important; /* 与 pre 保持一致 */
+}
+
+.user-message-markdown .wmde-markdown blockquote {
+  border-left: 3px solid rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  padding: 8px 12px !important;
+  margin: 0.4em 0 !important;
+  border-radius: 4px !important;
+  font-size: 0.75rem !important;
+}
+
+.user-message-markdown .wmde-markdown a {
+  color: rgba(255, 255, 255, 0.9) !important;
+  text-decoration: underline !important;
+  font-size: 0.75rem !important;
+}
+
