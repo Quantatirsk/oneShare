@@ -16,7 +16,8 @@ import {
   useConversationState, 
   useTemplateState, 
   useUIState,
-  useCodeState
+  useCodeState,
+  useAPIState
 } from '@/contexts/CreatePageContext';
 
 interface ChatInterfaceProps {
@@ -27,7 +28,7 @@ interface ChatInterfaceProps {
   onRetryAnalysis?: (message: string) => void;
   onResetConversation?: () => void;
   onRetryCodeGeneration?: () => void;
-  onReviewCode?: (code: string) => void;
+  onReviewCode?: (code: string, messageId: string) => void;
   onTemplateSelect?: (template: any) => void;
 }
 
@@ -62,6 +63,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const { templates, setSelectedTemplate } = useTemplateState();
   const { ui, setTemplateCardCollapsed } = useUIState();
   const { code, setCurrentCode, setLastRendered, setHasPreviewContent } = useCodeState();
+  const { api } = useAPIState();
+  
+  // 调试：监控UI状态变化
+  console.log('🔄 [ChatInterface] UI状态更新:', { currentlyReviewedMessageId: ui.currentlyReviewedMessageId });
   
   // 编辑对话框状态
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -75,6 +80,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   
   // ThinkingModal 展开状态 (用于处理展开回调)
   const [, setIsThinkingExpanded] = useState(false);
+  
+  // 当前生成任务使用的模型ID状态
+  const [currentGenerationModelId, setCurrentGenerationModelId] = useState<string>('');
+  
+  // 监听生成阶段变化，记录使用的模型ID
+  React.useEffect(() => {
+    if (conversation.stage === 'generating') {
+      setCurrentGenerationModelId(api.selectedModel);
+    }
+  }, [conversation.stage, api.selectedModel]);
   
   // 当ThinkingModal显示时自动滚动到最底部，让thinking卡片显示在视野中
   React.useEffect(() => {
@@ -152,32 +167,26 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setEditDialogOpen(true);
   };
 
-  // 判断当前消息的代码是否为正在显示的代码
-  const isCurrentlyDisplayedCode = (messageContent: string): boolean => {
-    // 从消息内容中提取代码
-    const messageCode = extractCleanCode(messageContent, undefined, {
-      removeCodeblocks: true,
-      removeIntroText: true,
-      trimWhitespace: true,
-      preserveStructure: true,
-      debugMode: false
-    });
-    
-    // 比较提取的代码与当前显示的代码
-    const currentCode = code.current.trim();
-    return Boolean(messageCode && messageCode.trim() === currentCode);
-  };
 
   // 判断是否为最新的代码消息
   const isLatestCodeMessage = (messageId: string) => {
     const codeMessages = conversation.messages.filter(msg => 
       msg.type === 'code' && msg.content.includes('```')
     );
-    return codeMessages.length > 0 && codeMessages[codeMessages.length - 1].id === messageId;
+    const isLatest = codeMessages.length > 0 && codeMessages[codeMessages.length - 1].id === messageId;
+    console.log('🔍 [isLatestCodeMessage] 检查:', { 
+      messageId, 
+      isLatest, 
+      totalCodeMessages: codeMessages.length,
+      latestCodeMessageId: codeMessages.length > 0 ? codeMessages[codeMessages.length - 1].id : null
+    });
+    return isLatest;
   };
 
   // 处理查看历史代码
-  const handleReviewCode = (messageContent: string) => {
+  const handleReviewCode = (messageContent: string, messageId: string) => {
+    console.log('🔍 [ChatInterface] handleReviewCode 被调用:', { messageId });
+    
     // 从消息内容中提取代码
     const code = extractCleanCode(messageContent, undefined, {
       removeCodeblocks: true,
@@ -188,7 +197,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     });
     
     if (code && onReviewCode) {
-      onReviewCode(code);
+      console.log('🔍 [ChatInterface] 调用 onReviewCode:', { messageId, codeLength: code.length });
+      onReviewCode(code, messageId);
+    } else {
+      console.log('🔍 [ChatInterface] 无法调用 onReviewCode:', { hasCode: !!code, hasCallback: !!onReviewCode });
     }
   };
 
@@ -564,7 +576,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ) : (
               /* Creative Prompts - Only show when no template selected */
               <CreativePromptsSection 
-                onPromptSelect={(prompt) => onSendMessage?.(prompt)} 
+                onPromptSelect={(prompt) => {
+                  // 只有用户主动点击选中的卡片时才发送消息
+                  // 切换卡片只是为了浏览，不应该自动发送
+                  console.log('📤 [ChatInterface] 准备发送创意提示:', prompt);
+                  if (onSendMessage) {
+                    onSendMessage(prompt);
+                  }
+                }}
               />
             )}
           </div>
@@ -602,8 +621,18 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </div>
                       )}
                       
-                      {/* 代码消息的特殊处理 */}
-                      {message.type === 'code' && message.content.includes('```') && (
+                      {/* 代码消息的特殊处理 - 始终显示代码消息，让按钮状态能正确工作 */}
+                      {(() => {
+                        const isCodeMessage = message.type === 'code' && message.content.includes('```');
+                        console.log('🔍 [代码消息渲染检查]', { 
+                          messageId: message.id, 
+                          isCodeMessage,
+                          messageType: message.type,
+                          hasCodeBlocks: message.content.includes('```'),
+                          stage: conversation.stage
+                        });
+                        return isCodeMessage;
+                      })() && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -621,6 +650,9 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             isGenerating={false}
                             type="code"
                             className="mb-2"
+                            enableAdaptive={false}
+                            enableSmoothScroll={false}
+                            modelId={message.modelId}
                             onExpandChange={(expanded) => {
                               setIsThinkingExpanded(expanded);
                               if (expanded) {
@@ -646,54 +678,99 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             transition={{ delay: 0.3 }}
                             className="mt-3 flex justify-center"
                           >
-                            {isCurrentlyDisplayedCode(message.content) && isLatestCodeMessage(message.id) ? (
-                              // 当前显示的最新代码：显示重新生成按钮
-                              <Button
-                                onClick={onRetryCodeGeneration}
-                                disabled={conversation.stage === 'generating'}
-                                className="h-9 px-4 bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 hover:from-orange-600 hover:via-red-600 hover:to-pink-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
-                                title="重新生成代码"
-                              >
-                                <motion.div
-                                  whileHover={{ scale: 1.02 }}
-                                  whileTap={{ scale: 0.98 }}
-                                  className="flex items-center justify-center gap-2"
-                                >
-                                  <RotateCcw className="w-4 h-4" />
-                                  <span className="font-medium">重新生成</span>
-                                </motion.div>
-                              </Button>
-                            ) : (
-                              // 其他情况：显示Review按钮
-                              <Button
-                                onClick={() => handleReviewCode(message.content)}
-                                disabled={isCurrentlyDisplayedCode(message.content)}
-                                className={`h-9 px-4 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300 ${
-                                  isCurrentlyDisplayedCode(message.content) 
-                                    ? 'bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 cursor-default'
-                                    : 'bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 hover:from-blue-600 hover:via-indigo-600 hover:to-purple-600'
-                                }`}
-                                title={isCurrentlyDisplayedCode(message.content) ? "当前显示的版本" : "查看这个版本的代码"}
-                              >
-                                <motion.div
-                                  whileHover={{ scale: isCurrentlyDisplayedCode(message.content) ? 1 : 1.02 }}
-                                  whileTap={{ scale: isCurrentlyDisplayedCode(message.content) ? 1 : 0.98 }}
-                                  className="flex items-center justify-center gap-2"
-                                >
-                                  {isCurrentlyDisplayedCode(message.content) ? (
-                                    <>
+                            {(() => {
+                              const isCurrentlyReviewed = ui.currentlyReviewedMessageId === message.id;
+                              const isLatestCode = isLatestCodeMessage(message.id);
+                              const hasReviewState = ui.currentlyReviewedMessageId !== null;
+                              
+                              // 调试日志
+                              console.log(`🔘 [按钮状态] 消息${message.id}:`, {
+                                isCurrentlyReviewed,
+                                isLatestCode,
+                                hasReviewState,
+                                reviewedMessageId: ui.currentlyReviewedMessageId,
+                                messageId: message.id
+                              });
+                              
+                              // 历史代码被Review：显示"当前版本"按钮（禁用状态）
+                              if (isCurrentlyReviewed && !isLatestCode) {
+                                return (
+                                  <Button
+                                    disabled={true}
+                                    className="h-9 px-4 bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 text-white border-0 shadow-lg cursor-default"
+                                    title="当前显示的版本"
+                                  >
+                                    <motion.div className="flex items-center justify-center gap-2">
                                       <Eye className="w-4 h-4" />
                                       <span className="font-medium">当前版本</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Eye className="w-4 h-4" />
-                                      <span className="font-medium">Review</span>
-                                    </>
-                                  )}
-                                </motion.div>
-                              </Button>
-                            )}
+                                    </motion.div>
+                                  </Button>
+                                );
+                              }
+                              
+                              // 最新代码消息的按钮逻辑
+                              if (isLatestCode) {
+                                // 如果有历史版本正在被Review（即有Review状态但不是自己被Review）
+                                if (hasReviewState && !isCurrentlyReviewed) {
+                                  // 显示Review按钮
+                                  return (
+                                    <Button
+                                      onClick={() => handleReviewCode(message.content, message.id)}
+                                      disabled={false}
+                                      className="h-9 px-4 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 hover:from-blue-600 hover:via-indigo-600 hover:to-purple-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
+                                      title="查看这个版本的代码"
+                                    >
+                                      <motion.div
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        className="flex items-center justify-center gap-2"
+                                      >
+                                        <Eye className="w-4 h-4" />
+                                        <span className="font-medium">Review</span>
+                                      </motion.div>
+                                    </Button>
+                                  );
+                                } else {
+                                  // 无Review状态或自己被Review：显示重新生成按钮
+                                  return (
+                                    <Button
+                                      onClick={onRetryCodeGeneration}
+                                      disabled={conversation.stage === 'generating'}
+                                      className="h-9 px-4 bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 hover:from-orange-600 hover:via-red-600 hover:to-pink-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
+                                      title="重新生成代码"
+                                    >
+                                      <motion.div
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        className="flex items-center justify-center gap-2"
+                                      >
+                                        <RotateCcw className="w-4 h-4" />
+                                        <span className="font-medium">重新生成</span>
+                                      </motion.div>
+                                    </Button>
+                                  );
+                                }
+                              }
+                              
+                              // 历史代码消息：显示Review按钮
+                              return (
+                                <Button
+                                  onClick={() => handleReviewCode(message.content, message.id)}
+                                  disabled={false}
+                                  className="h-9 px-4 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 hover:from-blue-600 hover:via-indigo-600 hover:to-purple-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
+                                  title="查看这个版本的代码"
+                                >
+                                  <motion.div
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    className="flex items-center justify-center gap-2"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                    <span className="font-medium">Review</span>
+                                  </motion.div>
+                                </Button>
+                              );
+                            })()}
                           </motion.div>
                         </motion.div>
                       )}
@@ -779,7 +856,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 )}
               </div>
             ))}
-            {/* 代码生成时的 ThinkingModal */}
+            {/* 代码生成时的实时 ThinkingModal - 只在生成中显示 */}
             {conversation.stage === 'generating' && (
               <div className="space-y-3">
                 {/* 传统的生成提示 */}
@@ -801,11 +878,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   <ThinkingModal
                     isVisible={true}
                     content={code.streaming || code.current || ''}
-                    title={`${currentVerb}...`}
+                    title={code.isStreaming ? `${currentVerb}...` : "代码生成完成"}
                     isGenerating={code.isStreaming}
                     type="code"
                     className="mb-4"
-                    enableSmoothScroll={true}
+                    enableSmoothScroll={false}
+                    enableAdaptive={true}
+                    showPerformanceStats={true}
+                    modelId={currentGenerationModelId}
                     onExpandChange={(expanded) => {
                       setIsThinkingExpanded(expanded);
                       if (expanded) {

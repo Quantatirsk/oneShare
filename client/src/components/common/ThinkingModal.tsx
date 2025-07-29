@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Brain, Code, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { extractCleanCode } from '@/utils/codeCleaningUtils';
+import { useAdaptiveThinking } from '@/hooks/useAdaptiveThinking';
 
 interface ThinkingModalProps {
   isVisible?: boolean;
@@ -12,7 +13,10 @@ interface ThinkingModalProps {
   type?: 'thinking' | 'code' | 'analysis';
   onExpandChange?: (expanded: boolean) => void;
   className?: string;
-  enableSmoothScroll?: boolean; // 新增：是否启用丝滑滚动
+  enableSmoothScroll?: boolean; // 是否启用丝滑滚动
+  enableAdaptive?: boolean; // 新增：是否启用自适应功能
+  showPerformanceStats?: boolean; // 新增：是否显示性能统计
+  modelId?: string; // 新增：LLM模型ID
 }
 
 // 分离头部组件 - 不依赖content，避免频繁重渲染
@@ -23,7 +27,17 @@ const ThinkingHeader = memo<{
   isExpanded: boolean;
   onToggleExpand: () => void;
   type: 'thinking' | 'code' | 'analysis';
-}>(({ title, isGenerating, seconds, isExpanded, onToggleExpand, type }) => {
+  showPerformanceStats?: boolean;
+  modelId?: string;
+  performanceStats?: {
+    responseLatency: number | null;
+    generationSpeed: number;
+    averageChunkSize: number;
+    totalChunks: number;
+    scrollSpeed: number;
+    isOptimized: boolean;
+  };
+}>(({ title, isGenerating, seconds, isExpanded, onToggleExpand, type, showPerformanceStats, modelId, performanceStats }) => {
   // 获取图标和主题 - shadcn黑白灰配色
   const getTypeConfig = () => {
     switch (type) {
@@ -52,49 +66,72 @@ const ThinkingHeader = memo<{
   const IconComponent = config.icon;
 
   return (
-    <div className="flex items-center justify-between px-3 py-1 border-b border-border">
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <IconComponent className={cn("w-4 h-4", config.color)} />
-          {isGenerating && (
-            <motion.div
-              animate={{
-                scale: [1, 1.2, 1],
-                opacity: [0.7, 1, 0.7]
-              }}
-              transition={{
-                duration: 1.5,
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-              className={cn(
-                "absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full",
-                config.pulseColor
-              )}
-            />
-          )}
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between px-3 py-1">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <IconComponent className={cn("w-4 h-4", config.color)} />
+            {isGenerating && (
+              <motion.div
+                animate={{
+                  scale: [1, 1.2, 1],
+                  opacity: [0.7, 1, 0.7]
+                }}
+                transition={{
+                  duration: 1.5,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+                className={cn(
+                  "absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full",
+                  config.pulseColor
+                )}
+              />
+            )}
+          </div>
+          <span className="text-sm font-medium text-foreground">
+            {title} {isGenerating && `${seconds}秒`}
+          </span>
         </div>
-        <span className="text-sm font-medium text-foreground">
-          {title} {isGenerating && `${seconds}秒`}
-        </span>
-      </div>
-      
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggleExpand();
-        }}
-        className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm cursor-pointer bg-transparent border-none p-1"
-        style={{ pointerEvents: 'auto', zIndex: 1000 }}
-      >
-        <span>{isExpanded ? '收起' : '展开'}</span>
-        {isExpanded ? (
-          <ChevronUp className="w-4 h-4" />
-        ) : (
-          <ChevronDown className="w-4 h-4" />
+        
+        {/* 中间显示模型ID */}
+        {modelId && (
+          <div className="flex-1 flex justify-center">
+            <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+              {modelId}
+            </span>
+          </div>
         )}
-      </button>
+        
+        <div className="flex items-center gap-2">
+          {showPerformanceStats && performanceStats && (
+            <div className="text-xs text-muted-foreground">
+              {performanceStats.generationSpeed > 0 && (
+                <span>
+                  {performanceStats.generationSpeed.toFixed(1)} token/s
+                </span>
+              )}
+            </div>
+          )}
+          
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleExpand();
+            }}
+            className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm cursor-pointer bg-transparent border-none p-1"
+            style={{ pointerEvents: 'auto', zIndex: 1000 }}
+          >
+            <span>{isExpanded ? '收起' : '展开'}</span>
+            {isExpanded ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 });
@@ -122,7 +159,10 @@ const ThinkingContent = memo<{
   scrollPosition: number;
   enableSmoothScroll: boolean;
   isGenerating: boolean;
-}>(({ content, isExpanded, scrollPosition, enableSmoothScroll, isGenerating }) => {
+  enableAdaptive: boolean;
+  adaptiveScrollPosition: number;
+  adaptiveShouldShow: boolean;
+}>(({ content, isExpanded, scrollPosition, enableSmoothScroll, isGenerating, enableAdaptive, adaptiveScrollPosition, adaptiveShouldShow }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [expandedHeight, setExpandedHeight] = useState<number | null>(null);
@@ -135,48 +175,49 @@ const ThinkingContent = memo<{
   const startTimeRef = useRef<number>(0);
   const animationRef = useRef<number>(0);
   const smoothScrollStarted = useRef(false);
+
+  // 选择使用哪种显示模式
+  const shouldShowContent = enableAdaptive ? adaptiveShouldShow : showContent;
+  const currentScrollPosition = enableAdaptive ? adaptiveScrollPosition : (enableSmoothScroll ? smoothScrollY : scrollPosition);
   
   // 预处理内容
   const processedContent = useMemo(() => processContent(content), [content]);
 
-  // 重置状态当生成开始/结束时
+  // 重置状态当生成开始/结束时 - 仅在非自适应模式下使用
   useEffect(() => {
-    if (enableSmoothScroll) {
+    if (enableSmoothScroll && !enableAdaptive) {
       if (isGenerating && !startTimeRef.current) {
-        // 生成开始时重置状态
+        // 生成开始时重置状态，立即显示内容
         console.log('🎬 ThinkingModal: 开始生成，重置状态');
         startTimeRef.current = Date.now();
-        setShowContent(false);
+        setShowContent(true); // 立即显示内容，不再延迟
         setDisplayContent('');
-        smoothScrollStarted.current = false;
+        smoothScrollStarted.current = true; // 立即启动滚动
         setSmoothScrollY(0);
-
-        // 2秒后开始显示内容
-        const timer = setTimeout(() => {
-          console.log('⏰ ThinkingModal: 2秒延迟结束，开始显示内容');
-          setShowContent(true);
-          smoothScrollStarted.current = true;
-        }, 2000);
-
-        return () => clearTimeout(timer);
       } else if (!isGenerating && startTimeRef.current) {
         // 生成结束时重置计时器，为下次生成做准备
         console.log('🏁 ThinkingModal: 生成结束，重置计时器');
         startTimeRef.current = 0;
       }
     }
-  }, [enableSmoothScroll, isGenerating]);
+  }, [enableSmoothScroll, enableAdaptive, isGenerating]);
 
   // 非启用模式的立即显示
   useEffect(() => {
-    if (!enableSmoothScroll) {
+    if (!enableSmoothScroll && !enableAdaptive) {
       setShowContent(true);
       setDisplayContent(processedContent);
     }
-  }, [processedContent, enableSmoothScroll]);
+  }, [processedContent, enableSmoothScroll, enableAdaptive]);
 
-  // 内容更新和显示逻辑
+  // 内容更新和显示逻辑 - 仅在非自适应模式下使用
   useEffect(() => {
+    if (enableAdaptive) {
+      // 自适应模式下直接显示处理后的内容
+      setDisplayContent(processedContent);
+      return;
+    }
+    
     if (!showContent || !enableSmoothScroll) {
       setDisplayContent(processedContent);
       return;
@@ -197,11 +238,11 @@ const ThinkingContent = memo<{
     } else {
       setDisplayContent(processedContent);
     }
-  }, [processedContent, showContent, displayContent, enableSmoothScroll]);
+  }, [processedContent, showContent, displayContent, enableSmoothScroll, enableAdaptive]);
 
-  // 丝滑向上滚动动画引擎
+  // 丝滑向上滚动动画引擎 - 仅在非自适应模式下使用
   useEffect(() => {
-    if (!enableSmoothScroll || !showContent || isExpanded || !smoothScrollStarted.current) {
+    if (enableAdaptive || !enableSmoothScroll || !showContent || isExpanded || !smoothScrollStarted.current) {
       return;
     }
 
@@ -228,7 +269,7 @@ const ThinkingContent = memo<{
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [enableSmoothScroll, showContent, isExpanded, smoothScrollStarted.current]);
+  }, [enableAdaptive, enableSmoothScroll, showContent, isExpanded, smoothScrollStarted.current]);
 
   // 监听展开状态变化，记录完全展开时的高度
   useEffect(() => {
@@ -283,12 +324,10 @@ const ThinkingContent = memo<{
         ref={scrollRef}
         className={isExpanded ? "p-4 max-h-96 overflow-y-auto" : "absolute inset-0 p-4"}
         style={!isExpanded ? {
-          transform: enableSmoothScroll && showContent 
-            ? `translateY(-${smoothScrollY}px)` 
-            : `translateY(-${scrollPosition}px)`
+          transform: `translateY(-${currentScrollPosition}px)`
         } : undefined}
       >
-        {!showContent && enableSmoothScroll ? (
+        {!shouldShowContent && (enableSmoothScroll || enableAdaptive) ? (
           <div className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px] flex items-center justify-center">
             <div className="text-center">
               <div className="mb-2">⏳</div>
@@ -319,12 +358,29 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
   type = 'thinking',
   onExpandChange,
   className,
-  enableSmoothScroll = false
+  enableSmoothScroll = false,
+  enableAdaptive = true,
+  showPerformanceStats = false,
+  modelId
 }) => {
   const [seconds, setSeconds] = useState(0);
   const [scrollPosition, setScrollPosition] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 使用自适应thinking hook
+  const {
+    shouldShow: adaptiveShouldShow,
+    scrollPosition: adaptiveScrollPosition,
+    getPerformanceStats
+  } = useAdaptiveThinking({
+    content,
+    isGenerating,
+    enableAdaptive
+  });
+
+  // 获取性能统计信息
+  const performanceStats = showPerformanceStats ? getPerformanceStats() : undefined;
 
   // 优化的展开切换函数，减少重渲染
   const handleToggleExpand = useCallback(() => {
@@ -382,15 +438,15 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
     prevContentRef.current = content;
   }, [content, isGenerating, isExpanded, isVisible]);
 
-  // 组件初始化或重新显示时重置状态
+  // 组件初始化或重新显示时重置状态 - 只对生成中的modal重置
   useEffect(() => {
-    if (isVisible) {
+    if (isVisible && isGenerating) {
       setScrollPosition(0);
       setSeconds(0);
       prevContentRef.current = '';
       setIsExpanded(false); // 重置展开状态
     }
-  }, [isVisible]);
+  }, [isVisible, isGenerating]);
 
   if (!isVisible) {
     return null;
@@ -429,6 +485,9 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
           isExpanded={isExpanded}
           onToggleExpand={handleToggleExpand}
           type={type}
+          showPerformanceStats={showPerformanceStats}
+          modelId={modelId}
+          performanceStats={performanceStats}
         />
 
         {/* 使用分离的内容组件 */}
@@ -438,6 +497,9 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
           scrollPosition={scrollPosition}
           enableSmoothScroll={enableSmoothScroll}
           isGenerating={isGenerating}
+          enableAdaptive={enableAdaptive}
+          adaptiveScrollPosition={adaptiveScrollPosition}
+          adaptiveShouldShow={adaptiveShouldShow}
         />
       </div>
     </motion.div>

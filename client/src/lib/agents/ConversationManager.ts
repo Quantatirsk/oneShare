@@ -10,16 +10,17 @@ export interface ConversationState {
   currentSession: CodeGenerationSession | null;
   selectedTemplate: any;
   codeLang: 'tsx' | 'html';
+  currentModel?: string; // 当前使用的模型ID
   error?: string;
 }
 
 export interface ConversationCallbacks {
   onStageChange?: (stage: ConversationStage) => void;
   onAnalysisChunk?: (chunk: string, analysis: RequirementAnalysisResult) => void;
-  onAnalysisComplete?: (analysis: RequirementAnalysisResult) => void;
+  onAnalysisComplete?: (analysis: RequirementAnalysisResult, modelId?: string) => void;
   onUserMessage?: (message: string) => void;
   onCodeChunk?: (chunk: string) => void;
-  onCodeComplete?: () => void;
+  onCodeComplete?: (modelId?: string) => void;
   onError?: (error: string) => void;
 }
 
@@ -71,6 +72,13 @@ export class ConversationManager {
   }
 
   /**
+   * 获取当前使用的模型ID
+   */
+  getCurrentModel(): string | undefined {
+    return this.state.currentModel;
+  }
+
+  /**
    * 开始需求分析 (流式)
    */
   async startRequirementAnalysis(
@@ -81,6 +89,7 @@ export class ConversationManager {
       stage: 'analyzing',
       currentRequirement: userRequirement,
       currentAnalysis: null,
+      currentModel: model, // 存储当前使用的模型ID
       error: undefined
     });
 
@@ -98,7 +107,7 @@ export class ConversationManager {
             stage: 'ready_to_generate',
             currentAnalysis: analysis
           });
-          this.callbacks.onAnalysisComplete?.(analysis);
+          this.callbacks.onAnalysisComplete?.(analysis, this.state.currentModel);
         },
         (error, analysis) => {
           this.updateState({
@@ -136,7 +145,8 @@ export class ConversationManager {
     }
 
     this.updateState({
-      stage: 'generating'
+      stage: 'generating',
+      currentModel: model // 存储当前使用的模型ID
     });
 
     // 开始新的代码生成会话
@@ -160,7 +170,7 @@ export class ConversationManager {
             this.updateState({
               stage: 'completed'
             });
-            this.callbacks.onCodeComplete?.();
+            this.callbacks.onCodeComplete?.(this.state.currentModel);
           },
           onError: (error) => {
             this.updateState({
@@ -206,6 +216,7 @@ export class ConversationManager {
     this.updateState({
       stage: 'generating',
       currentRequirement: userMessage,
+      currentModel: model, // 存储当前使用的模型ID
       error: undefined
     });
 
@@ -220,7 +231,7 @@ export class ConversationManager {
             this.updateState({
               stage: 'completed'
             });
-            this.callbacks.onCodeComplete?.();
+            this.callbacks.onCodeComplete?.(this.state.currentModel);
           },
           onError: (error) => {
             this.updateState({

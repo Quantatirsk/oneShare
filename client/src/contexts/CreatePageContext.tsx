@@ -12,6 +12,7 @@ export interface Message {
   type?: 'analysis' | 'code' | 'conversation';
   isStreaming?: boolean;
   analysisId?: string;
+  modelId?: string; // 执行任务时使用的模型ID
 }
 
 // 分层状态设计
@@ -23,6 +24,7 @@ export interface CreatePageState {
     isTemplateCardCollapsed: boolean;
     isMobile: boolean;
     topAlert: { message: string; type: 'success' | 'error' } | null;
+    currentlyReviewedMessageId: string | null; // 当前正在Review的消息ID
   };
 
   // 模板层状态
@@ -77,6 +79,7 @@ export type CreatePageAction =
   | { type: 'UI_SET_TEMPLATE_CARD_COLLAPSED'; payload: boolean }
   | { type: 'UI_SET_IS_MOBILE'; payload: boolean }
   | { type: 'UI_SET_TOP_ALERT'; payload: { message: string; type: 'success' | 'error' } | null }
+  | { type: 'UI_SET_CURRENTLY_REVIEWED_MESSAGE_ID'; payload: string | null }
   
   // Template Actions
   | { type: 'TEMPLATE_SET_SELECTED'; payload: Template | null }
@@ -128,6 +131,7 @@ const initialState: CreatePageState = {
     isTemplateCardCollapsed: false,
     isMobile: false,
     topAlert: null,
+    currentlyReviewedMessageId: null,
   },
   templates: {
     selected: null,
@@ -182,6 +186,9 @@ function createPageReducer(state: CreatePageState, action: CreatePageAction): Cr
     
     case 'UI_SET_TOP_ALERT':
       return { ...state, ui: { ...state.ui, topAlert: action.payload } };
+    
+    case 'UI_SET_CURRENTLY_REVIEWED_MESSAGE_ID':
+      return { ...state, ui: { ...state.ui, currentlyReviewedMessageId: action.payload } };
     
     // Template Actions
     case 'TEMPLATE_SET_SELECTED':
@@ -359,6 +366,7 @@ interface CreatePageActions {
   setTemplateCardCollapsed: (collapsed: boolean) => void;
   setIsMobile: (isMobile: boolean) => void;
   setTopAlert: (alert: { message: string; type: 'success' | 'error' } | null) => void;
+  setCurrentlyReviewedMessageId: (messageId: string | null) => void;
   
   // Template Actions
   setSelectedTemplate: (template: Template | null) => void;
@@ -423,6 +431,7 @@ export const CreatePageProvider: React.FC<CreatePageProviderProps> = ({ children
     setTemplateCardCollapsed: (collapsed) => dispatch({ type: 'UI_SET_TEMPLATE_CARD_COLLAPSED', payload: collapsed }),
     setIsMobile: (isMobile) => dispatch({ type: 'UI_SET_IS_MOBILE', payload: isMobile }),
     setTopAlert: (alert) => dispatch({ type: 'UI_SET_TOP_ALERT', payload: alert }),
+    setCurrentlyReviewedMessageId: (messageId) => dispatch({ type: 'UI_SET_CURRENTLY_REVIEWED_MESSAGE_ID', payload: messageId }),
     
     // Template Actions
     setSelectedTemplate: (template) => dispatch({ type: 'TEMPLATE_SET_SELECTED', payload: template }),
@@ -500,6 +509,7 @@ export const useUIState = () => {
     setTemplateCardCollapsed: actions.setTemplateCardCollapsed,
     setIsMobile: actions.setIsMobile,
     setTopAlert: actions.setTopAlert,
+    setCurrentlyReviewedMessageId: actions.setCurrentlyReviewedMessageId,
   };
 };
 

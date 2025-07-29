@@ -67,6 +67,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
   // 使用 useCallback 优化函数，避免每次渲染都重新创建
   const handleSend = useCallback(() => {
     const trimmedText = localInputText.trim();
+    console.log('📤 [InputArea] handleSend 被调用:', { trimmedText, localInputText });
     if (trimmedText) {
       // 立即同步到Context以确保发送的是最新内容
       setInputText(trimmedText);

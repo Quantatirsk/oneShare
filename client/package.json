@@ -34,6 +34,7 @@
     "esbuild-wasm": "^0.25.5",
     "framer-motion": "^12.20.1",
     "franc": "^6.2.0",
+    "gpt-tokenizer": "^3.0.1",
     "jszip": "^3.10.1",
     "katex": "^0.16.22",
     "lodash": "^4.17.21",

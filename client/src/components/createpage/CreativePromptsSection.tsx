@@ -31,11 +31,23 @@ export const CreativePromptsSection: React.FC<CreativePromptsSectionProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const { setSelectedPrompt } = useConversationState();
 
-  // 同步选中的提示词到Context
+  // 同步选中的提示词到Context - 只在组件初始化时设置一次
+  // 避免频繁更新导致意外的副作用
   useEffect(() => {
-    if (prompts[currentIndex]) {
-      setSelectedPrompt(prompts[currentIndex].prompt);
+    if (prompts[0]) {
+      setSelectedPrompt(prompts[0].prompt);
     }
+  }, [prompts, setSelectedPrompt]); // 移除currentIndex依赖
+  
+  // 当卡片切换时，延迟更新selectedPrompt，避免过于频繁的状态更新
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (prompts[currentIndex]) {
+        setSelectedPrompt(prompts[currentIndex].prompt);
+      }
+    }, 100); // 100ms延迟
+    
+    return () => clearTimeout(timeoutId);
   }, [currentIndex, prompts, setSelectedPrompt]);
 
   const handlePrevious = () => {
@@ -48,9 +60,19 @@ export const CreativePromptsSection: React.FC<CreativePromptsSectionProps> = ({
 
   // 移除滚轮自动选中，避免卡顿和闪烁
 
-  // 键盘导航支持
+  // 键盘导航支持 - 只在聚焦时生效，避免与输入框冲突
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // 如果用户正在输入框中输入，不处理这些快捷键
+      const activeElement = document.activeElement as HTMLElement;
+      if (activeElement && (
+        activeElement.tagName === 'INPUT' || 
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.contentEditable === 'true'
+      )) {
+        return;
+      }
+
       switch (event.key) {
         case 'ArrowUp':
           event.preventDefault();
@@ -62,28 +84,36 @@ export const CreativePromptsSection: React.FC<CreativePromptsSectionProps> = ({
           break;
         case 'Enter':
         case ' ':
-          event.preventDefault();
-          onPromptSelect(prompts[currentIndex].prompt);
+          // 额外检查：确保用户真的想要发送创意提示
+          // 而不是意外触发
+          if (event.target === document.body || 
+              (event.target as HTMLElement)?.closest('.creative-prompts-section')) {
+            event.preventDefault();
+            onPromptSelect(prompts[currentIndex].prompt);
+          }
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex]);
+  }, [currentIndex, prompts, onPromptSelect]);
 
   const handleCardClick = (index: number) => {
     if (index === currentIndex) {
       // 点击中间的卡片，执行选择操作
+      // 添加确认机制，确保用户真的想要发送
+      console.log('🎯 [CreativePrompts] 用户点击发送创意提示:', prompts[index].prompt);
       onPromptSelect(prompts[index].prompt);
     } else {
       // 点击上下的卡片，切换到该卡片
+      console.log('🔄 [CreativePrompts] 用户切换到卡片:', index);
       setCurrentIndex(index);
     }
   };
 
   return (
-    <div className="mt-6 space-y-4">
+    <div className="mt-6 space-y-4 creative-prompts-section">
       <div className="text-center">
         <h3 className="text-sm font-semibold text-foreground mb-1">✨ 创意提示</h3>
         <p className="text-xs text-muted-foreground">滚动查看，点击选择</p>

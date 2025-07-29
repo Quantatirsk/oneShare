@@ -8,6 +8,7 @@ import {
   useCodeState, 
   useTemplateState, 
   useAPIState,
+  useUIState,
   Message 
 } from '@/contexts/CreatePageContext';
 
@@ -17,9 +18,8 @@ interface UseConversationFlowProps {
 }
 
 export function useConversationFlow({ 
-  previewContainerRef, 
-  renderPreview 
-}: UseConversationFlowProps) {
+  previewContainerRef
+}: Omit<UseConversationFlowProps, 'renderPreview'>) {
   const { toast } = useToast();
   const { conversation, addMessage, updateMessage, setConversationStage, resetConversation } = useConversationState();
   const { 
@@ -33,6 +33,7 @@ export function useConversationFlow({
   } = useCodeState();
   const { templates } = useTemplateState();
   const { api } = useAPIState();
+  const { setCurrentlyReviewedMessageId } = useUIState();
   
   const streamingAccumulatorRef = useRef<string>('');
   const chatMessagesRef = useRef<HTMLDivElement>(null);
@@ -97,7 +98,8 @@ export function useConversationFlow({
             timestamp: analysis.timestamp,
             type: 'analysis',
             isStreaming: true,
-            analysisId: analysis.id
+            analysisId: analysis.id,
+            modelId: conversationManager.getCurrentModel() || api.selectedModel // 从ConversationManager获取实际使用的模型
           };
           
           addMessage(assistantMessage);
@@ -113,13 +115,14 @@ export function useConversationFlow({
         }
       },
 
-      onAnalysisComplete: (analysis) => {
+      onAnalysisComplete: (analysis, modelId?: string) => {
         // 标记流式完成
         const messageIds = analysisMessagesRef.current.get(analysis.id);
         if (messageIds) {
           updateMessage(messageIds.assistantMsgId, {
             content: analysis.analysis,
-            isStreaming: false
+            isStreaming: false,
+            modelId: modelId || conversationManager.getCurrentModel() || api.selectedModel // 确保分析完成时也有正确的模型ID
           });
         }
         
@@ -153,7 +156,7 @@ export function useConversationFlow({
         setCurrentCode(streamingAccumulatorRef.current);
       },
 
-      onCodeComplete: async () => {
+      onCodeComplete: async (modelId?: string) => {
         let finalCode = conversationManager.getCurrentCode();
         
         // 使用统一的代码清理工具
@@ -179,13 +182,17 @@ export function useConversationFlow({
         setLastRendered('');
         setHasPreviewContent(false);
         
+        // 重置Review状态，因为有新代码生成
+        setCurrentlyReviewedMessageId(null);
+        
         // 添加生成的代码到消息历史
         const codeMessage: Message = {
           id: Date.now() + '',
           role: 'assistant',
           content: `\`\`\`${userSelectedLanguage}\n${finalCode}\n\`\`\``,
           timestamp: new Date(),
-          type: 'code'
+          type: 'code',
+          modelId: modelId || api.selectedModel // 使用实际传递的模型ID，后备使用当前选择的模型
         };
         
         addMessage(codeMessage);
@@ -206,10 +213,9 @@ export function useConversationFlow({
             console.log('🤖 [CodeComplete] 使用默认文件名:', { baseFileName, newFileName });
           }
           
-          // 自动渲染预览 - 使用用户选择的语言类型
-          setTimeout(() => {
-            renderPreview(finalCode, userSelectedLanguage, true);
-          }, 200);
+          // 移除手动渲染调用，交给 useCodeRenderer 的自动渲染逻辑处理
+          // 避免与 useCodeRenderer 的 useEffect 产生重复渲染
+          console.log('🎨 [CodeComplete] 代码设置完成，等待自动渲染');
         }
       },
 
@@ -335,6 +341,9 @@ export function useConversationFlow({
     conversationManager.reset();
     resetConversation();
     
+    // 重置Review状态
+    setCurrentlyReviewedMessageId(null);
+    
     // 重新同步当前的模板和代码语言设置
     if (templates.selected) {
       conversationManager.setSelectedTemplate(templates.selected);
@@ -350,12 +359,15 @@ export function useConversationFlow({
     if (previewContainerRef.current) {
       previewContainerRef.current.innerHTML = '';
     }
-  }, [resetConversation, previewContainerRef, templates.selected, code.language]);
+  }, [resetConversation, previewContainerRef, templates.selected, code.language, setCurrentlyReviewedMessageId]);
 
   // 只重置对话管理器状态，不清除UI消息历史
   const handleResetConversationManager = useCallback(() => {
     console.log('🔄 [Reset] Resetting conversation manager state...');
     conversationManager.reset();
+    
+    // 重置Review状态
+    setCurrentlyReviewedMessageId(null);
     
     // 重新同步当前的模板和代码语言设置
     if (templates.selected) {
@@ -367,7 +379,7 @@ export function useConversationFlow({
     activeAnalysisRef.current = null;
     analysisMessagesRef.current.clear();
     streamingAccumulatorRef.current = '';
-  }, [templates.selected, code.language]);
+  }, [templates.selected, code.language, setCurrentlyReviewedMessageId]);
 
   // 专门用于重试的发送消息函数 - 强制触发分析
   const handleRetryMessage = useCallback(async (message: string) => {
@@ -426,6 +438,10 @@ export function useConversationFlow({
       setStreamingCode('');
       setIsStreaming(false);
       setCurrentCode(''); // 清空之前生成的代码
+      
+      // 重置Review状态，因为要重新生成代码
+      setCurrentlyReviewedMessageId(null);
+      
       // 保留之前渲染的内容，让预览区继续显示上一次的结果
       // setLastRendered(''); // 不清空 - 保持上一次渲染的内容显示
       // setHasPreviewContent(false); // 不重置 - 保持预览可见
@@ -456,7 +472,7 @@ export function useConversationFlow({
         duration: 3000,
       });
     }
-  }, [conversation.stage, code.language, api.selectedModel, toast, setConversationStage, setStreamingCode, setIsStreaming, setCurrentCode, previewContainerRef]);
+  }, [conversation.stage, code.language, api.selectedModel, toast, setConversationStage, setStreamingCode, setIsStreaming, setCurrentCode, setCurrentlyReviewedMessageId, previewContainerRef]);
 
   return {
     chatMessagesRef,

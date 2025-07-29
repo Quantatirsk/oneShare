@@ -230,8 +230,7 @@ const CreatePageContent: React.FC = () => {
     handleRetryMessage,
     handleRetryCodeGeneration
   } = useConversationFlow({ 
-    previewContainerRef, 
-    renderPreview 
+    previewContainerRef
   });
   const { 
     handleCategoryChange, 
@@ -345,8 +344,16 @@ const CreatePageContent: React.FC = () => {
   };
 
   // Review code from history
-  const handleReviewCode = (code: string) => {
-    console.log('📖 [Review] Loading historical code version');
+  const handleReviewCode = (code: string, messageId: string) => {
+    console.log('📖 [CreatePage] handleReviewCode 被调用:', { messageId, codeLength: code.length });
+    console.log('📖 [CreatePage] 当前状态:', { 
+      currentReviewedId: state.ui.currentlyReviewedMessageId,
+      将要设置为: messageId 
+    });
+    
+    // Set currently reviewed message ID
+    actions.setCurrentlyReviewedMessageId(messageId);
+    console.log('📖 [CreatePage] 已设置 currentlyReviewedMessageId:', messageId);
     
     // Update code state
     actions.setCurrentCode(code);
@@ -356,6 +363,8 @@ const CreatePageContent: React.FC = () => {
     // Render preview with the reviewed code
     setTimeout(() => {
       renderPreview(code, state.code.language, true);
+      // Keep the reviewed state until another action occurs
+      // Don't auto-reset like before - let it stay until user takes another action
     }, 100);
   };
 
@@ -378,6 +387,7 @@ const CreatePageContent: React.FC = () => {
     
     // Reset UI state
     actions.setTopAlert(null);
+    actions.setCurrentlyReviewedMessageId(null);
     
     // Clear preview container
     if (previewContainerRef.current) {
