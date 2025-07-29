@@ -1313,7 +1313,7 @@ function App() {
     const timer = setTimeout(() => {
       if (config.serverAddress && !initialLoadRef.current) {
         initialLoadRef.current = true;
-        loadUnifiedFileList();
+        loadUnifiedFileList(false, ''); // 明确指定根目录
       }
     }, 0);
     

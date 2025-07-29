@@ -114,7 +114,14 @@ export class FileService {
             // 对文件列表进行排序
             const sortedFiles = this.sortFiles(response.data.files);
             store.setFiles(sortedFiles);
-            store.setCurrentPath(response.data.current_path);
+            // 只有当 targetPath 未提供时，才更新当前路径为 API 返回的路径
+            // 这样可以避免在子目录中操作文件后跳转到根目录
+            if (targetPath === undefined) {
+              store.setCurrentPath(response.data.current_path);
+            } else {
+              // 如果提供了 targetPath，确保当前路径与之同步
+              store.setCurrentPath(targetPath);
+            }
           } else {
             throw new Error(response.error || '获取文件列表失败');
           }
