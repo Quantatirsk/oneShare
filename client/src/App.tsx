@@ -218,7 +218,7 @@ function App() {
     const processedFiles = await processFilesForUpload(
       acceptedFiles, 
       api, 
-      currentPathRef.current,
+      currentPath,
       files
     );
     const totalFiles = processedFiles.length;
@@ -242,8 +242,8 @@ function App() {
     for (const file of processedFiles) {
       try {
         let fileName = file.finalName;
-        if (currentPathRef.current) {
-          fileName = `${currentPathRef.current}/${file.finalName}`;
+        if (currentPath) {
+          fileName = `${currentPath}/${file.finalName}`;
         }
         fileName = normalizePath(fileName);
 
@@ -339,10 +339,9 @@ function App() {
 
     setTimeout(() => setUploadProgress(null), 1000);
     loadUnifiedFileList(true, currentPath);
-  }, [config, api, toast, setUploadProgress, loadUnifiedFileList, files, currentPathRef]);
+  }, [config, api, toast, setUploadProgress, loadUnifiedFileList, files, currentPath]);
 
   const handleDirectoryClick = useCallback((path: string) => {
-    const currentPath = currentPathRef.current;
     
     
     if (path === '..') {
@@ -371,7 +370,7 @@ function App() {
       setCurrentPath(targetPath);
       loadUnifiedFileList(true, targetPath);
     }
-  }, [setCurrentPath, loadUnifiedFileList]);
+  }, [currentPath, setCurrentPath, loadUnifiedFileList]);
 
   const handleFileClick = useCallback(async (file: FileItem) => {
     if (isTextFile(file.filename)) {
@@ -657,8 +656,8 @@ function App() {
       const uniqueDirName = generateUniqueDirectoryName(dirName, files);
       
       let fullPath = uniqueDirName;
-      if (currentPathRef.current) {
-        fullPath = `${currentPathRef.current}/${uniqueDirName}`;
+      if (currentPath) {
+        fullPath = `${currentPath}/${uniqueDirName}`;
       }
       fullPath = normalizePath(fullPath);
 
