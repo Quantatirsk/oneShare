@@ -38,7 +38,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
   onSendMessage,
   isMobile = false
 }) => {
-  const { conversation, setInputText } = useConversationState();
+  const { conversation, setInputText, setSelectedPrompt } = useConversationState();
   const { ui, setRightPanelMode } = useUIState();
   const { code, setCodeLanguage } = useCodeState();
   const { api, setSelectedModel } = useAPIState();
@@ -73,8 +73,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
       onSendMessage(trimmedText);
       setLocalInputText('');
       setInputText('');
+      // 清理选中的创意提示
+      setSelectedPrompt('');
     }
-  }, [localInputText, onSendMessage, setInputText]);
+  }, [localInputText, onSendMessage, setInputText, setSelectedPrompt]);
 
   // 使用 useMemo 优化计算，只在依赖变化时重新计算
   const isDisabled = useMemo(() => {
@@ -117,6 +119,11 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
   // 缓存占位符文本
   const placeholderText = useMemo(() => {
+    // 只有在idle阶段才显示选中的创意提示
+    if (conversation.stage === 'idle' && conversation.selectedPrompt) {
+      return conversation.selectedPrompt;
+    }
+    
     if (conversation.stage === 'idle') {
       return "描述您想要创建的应用，AI将先分析需求...";
     } else if (conversation.stage === 'completed') {
@@ -124,7 +131,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
     } else {
       return "请等待当前操作完成...";
     }
-  }, [conversation.stage]);
+  }, [conversation.stage, conversation.selectedPrompt]);
 
   return (
     <div className="border-t bg-background flex flex-col p-2">
@@ -137,6 +144,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
           className={`w-full p-2.5 text-xs border rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 ${isMobile ? 'h-24' : 'h-32'}`}
           onKeyDown={handleKeyDown}
         />
+        
       </div>
       
       {/* Controls Row */}

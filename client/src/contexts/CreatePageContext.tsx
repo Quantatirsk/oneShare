@@ -39,6 +39,7 @@ export interface CreatePageState {
     stage: ConversationStage;
     messages: Message[];
     inputText: string;
+    selectedPrompt: string;
   };
 
   // 代码层状态
@@ -91,6 +92,7 @@ export type CreatePageAction =
   | { type: 'CONVERSATION_EDIT_MESSAGE_CONTENT'; payload: { id: string; content: string } }
   | { type: 'CONVERSATION_SET_MESSAGES'; payload: Message[] }
   | { type: 'CONVERSATION_SET_INPUT_TEXT'; payload: string }
+  | { type: 'CONVERSATION_SET_SELECTED_PROMPT'; payload: string }
   | { type: 'CONVERSATION_RESET'; }
   
   // Code Actions
@@ -138,6 +140,7 @@ const initialState: CreatePageState = {
     stage: 'idle',
     messages: [],
     inputText: '',
+    selectedPrompt: '',
   },
   code: {
     current: '',
@@ -237,10 +240,13 @@ function createPageReducer(state: CreatePageState, action: CreatePageAction): Cr
     case 'CONVERSATION_SET_INPUT_TEXT':
       return { ...state, conversation: { ...state.conversation, inputText: action.payload } };
     
+    case 'CONVERSATION_SET_SELECTED_PROMPT':
+      return { ...state, conversation: { ...state.conversation, selectedPrompt: action.payload } };
+    
     case 'CONVERSATION_RESET':
       return {
         ...state,
-        conversation: { stage: 'idle', messages: [], inputText: '' },
+        conversation: { stage: 'idle', messages: [], inputText: '', selectedPrompt: '' },
         code: { ...state.code, current: '', fileName: '', hasPreviewContent: false },
         templates: { ...state.templates, selected: null },
       };
@@ -368,6 +374,7 @@ interface CreatePageActions {
   editMessageContent: (id: string, content: string) => void;
   setMessages: (messages: Message[]) => void;
   setInputText: (text: string) => void;
+  setSelectedPrompt: (prompt: string) => void;
   resetConversation: () => void;
   
   // Code Actions
@@ -431,6 +438,7 @@ export const CreatePageProvider: React.FC<CreatePageProviderProps> = ({ children
     editMessageContent: (id, content) => dispatch({ type: 'CONVERSATION_EDIT_MESSAGE_CONTENT', payload: { id, content } }),
     setMessages: (messages) => dispatch({ type: 'CONVERSATION_SET_MESSAGES', payload: messages }),
     setInputText: (text) => dispatch({ type: 'CONVERSATION_SET_INPUT_TEXT', payload: text }),
+    setSelectedPrompt: (prompt: string) => dispatch({ type: 'CONVERSATION_SET_SELECTED_PROMPT', payload: prompt }),
     resetConversation: () => dispatch({ type: 'CONVERSATION_RESET' }),
     
     // Code Actions
@@ -517,6 +525,7 @@ export const useConversationState = () => {
     editMessageContent: actions.editMessageContent,
     setMessages: actions.setMessages,
     setInputText: actions.setInputText,
+    setSelectedPrompt: actions.setSelectedPrompt,
     resetConversation: actions.resetConversation,
   };
 };
