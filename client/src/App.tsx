@@ -242,8 +242,8 @@ function App() {
     for (const file of processedFiles) {
       try {
         let fileName = file.finalName;
-        if (currentPath) {
-          fileName = `${currentPath}/${file.finalName}`;
+        if (currentPathRef.current) {
+          fileName = `${currentPathRef.current}/${file.finalName}`;
         }
         fileName = normalizePath(fileName);
 
@@ -338,10 +338,11 @@ function App() {
     });
 
     setTimeout(() => setUploadProgress(null), 1000);
-    loadUnifiedFileList(true, currentPath);
-  }, [config, api, toast, setUploadProgress, loadUnifiedFileList, files, currentPath]);
+    loadUnifiedFileList(true);
+  }, [config, api, toast, setUploadProgress, loadUnifiedFileList, files]);
 
   const handleDirectoryClick = useCallback((path: string) => {
+    const currentPath = currentPathRef.current;
     
     
     if (path === '..') {
@@ -370,7 +371,7 @@ function App() {
       setCurrentPath(targetPath);
       loadUnifiedFileList(true, targetPath);
     }
-  }, [currentPath, setCurrentPath, loadUnifiedFileList]);
+  }, [setCurrentPath, loadUnifiedFileList]);
 
   const handleFileClick = useCallback(async (file: FileItem) => {
     if (isTextFile(file.filename)) {
@@ -588,7 +589,7 @@ function App() {
             description: `已重命名为 "${newName.trim()}"`,
             duration: 1500,
           });
-          loadUnifiedFileList(true, currentPath);
+          loadUnifiedFileList(true);
         } catch (error) {
           toast({
             title: "重命名失败",
@@ -656,8 +657,8 @@ function App() {
       const uniqueDirName = generateUniqueDirectoryName(dirName, files);
       
       let fullPath = uniqueDirName;
-      if (currentPath) {
-        fullPath = `${currentPath}/${uniqueDirName}`;
+      if (currentPathRef.current) {
+        fullPath = `${currentPathRef.current}/${uniqueDirName}`;
       }
       fullPath = normalizePath(fullPath);
 
@@ -667,7 +668,7 @@ function App() {
         description: `目录 ${uniqueDirName} 创建成功`,
         duration: 1500,
       });
-      loadUnifiedFileList(true, currentPath);
+      loadUnifiedFileList(true);
     } catch (error) {
       toast({
         title: "创建失败",
@@ -746,7 +747,7 @@ function App() {
       });
       
       // 刷新文件列表
-      loadUnifiedFileList(true, currentPath);
+      loadUnifiedFileList(true);
       
       // 打开文件编辑对话框（现在作为现有文件）
       setFileDialog({
@@ -783,7 +784,7 @@ function App() {
           duration: 1500,
         });
         
-        loadUnifiedFileList(true, currentPath);
+        loadUnifiedFileList(true);
         
         setFileDialog({
           isOpen: true,
@@ -921,7 +922,7 @@ function App() {
           description: `${isDirectory ? '目录' : '文件'}已${newLocked ? '锁定' : '解锁'}`,
           duration: 1500,
         });
-        loadUnifiedFileList(true, currentPath); // 刷新文件列表
+        loadUnifiedFileList(true); // 刷新文件列表
       } else {
         throw new Error(result.error || `${newLocked ? '锁定' : '解锁'}失败`);
       }
@@ -974,7 +975,7 @@ function App() {
         setDirectoryPermissionDialog(null);
         
         // 刷新文件列表
-        loadUnifiedFileList(true, currentPath);
+        loadUnifiedFileList(true);
       } else {
         throw new Error(result.error || '目录权限修改失败');
       }
@@ -1033,7 +1034,7 @@ function App() {
       }
       
       clearSelection();
-      loadUnifiedFileList(true, currentPath); // 刷新文件列表
+      loadUnifiedFileList(true); // 刷新文件列表
     } catch (error) {
       toast({
         title: `批量${locked ? '锁定' : '解锁'}失败`,
@@ -1047,14 +1048,14 @@ function App() {
   // Initialize hooks after all function definitions
   const { showPasteIndicator } = usePasteUpload({ 
     onFileUpload: handleFileUpload,
-    onFileListRefresh: () => loadUnifiedFileList(true, currentPath),
+    onFileListRefresh: () => loadUnifiedFileList(true),
     onLinkDetected: (url: string) => {
       setLinkPasteDialog({ isOpen: true, url });
     },
     onTextDetected: handleTextPasted
   });
   const { dragState, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd } = 
-    useInternalDragDrop({ files, onRefresh: () => loadUnifiedFileList(true, currentPath) });
+    useInternalDragDrop({ files, onRefresh: () => loadUnifiedFileList(true) });
 
   // Keyboard navigation
   useKeyboardNavigation({
@@ -1069,7 +1070,7 @@ function App() {
     onCreateDirectory: handleCreateDirectory,
     onSelectAll: handleSelectAll,
     onClearSelection: handleClearSelection,
-    onRefresh: () => loadUnifiedFileList(true, currentPath),
+    onRefresh: () => loadUnifiedFileList(true),
     onToggleViewMode: () => setViewMode(viewMode === 'list' ? 'grid' : 'list'),
     onShowSettings: () => setShowSettings(true),
     onShowShortcuts: () => setShowShortcuts(true),
@@ -1244,7 +1245,7 @@ function App() {
         
         // 使用防抖机制避免过于频繁的刷新
         refreshTimeoutRef.current = setTimeout(() => {
-          loadUnifiedFileList(true, currentPath);
+          loadUnifiedFileList(true);
           refreshTimeoutRef.current = undefined;
         }, delay);
       } else {
@@ -1638,7 +1639,7 @@ function App() {
           config={config}
           isNewFile={fileDialog.isNewFile}
           isReadOnly={fileDialog.isReadOnly}
-          onFileUpdate={() => loadUnifiedFileList(true, currentPath)}
+          onFileUpdate={() => loadUnifiedFileList(true)}
           wsClient={wsClient}
           isPublic={false}
           initialContent={fileDialog.initialContent}
@@ -1672,7 +1673,7 @@ function App() {
       <UrlInputModal
         isOpen={showUrlInput}
         onClose={() => setShowUrlInput(false)}
-        onFileListRefresh={() => loadUnifiedFileList(true, currentPath)}
+        onFileListRefresh={() => loadUnifiedFileList(true)}
         onLinkDetected={(url) => {
           setShowUrlInput(false);
           setLinkPasteDialog({ isOpen: true, url });
@@ -1704,7 +1705,7 @@ function App() {
         }}
         onProcessComplete={(result) => {
           // 提交任务后刷新文件列表
-          loadUnifiedFileList(true, currentPath);
+          loadUnifiedFileList(true);
           toast({
             title: "任务已提交",
             description: result.filename ? `文件将保存为: ${result.filename}` : "操作已完成",

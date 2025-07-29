@@ -99,8 +99,10 @@ export class FileService {
    * 乐观更新文件列表
    */
   public async refreshFileList(skipLoading = false, targetPath?: string): Promise<void> {
-    const key = this.generateRequestKey('listFiles', [targetPath]);
     const store = useAppStore.getState();
+    // 如果没有传递目标路径，使用当前状态中的路径
+    const actualTargetPath = targetPath !== undefined ? targetPath : store.currentPath;
+    const key = this.generateRequestKey('listFiles', [actualTargetPath]);
     
     return this.dedupRequest(key, async () => {
       return this.executeWithRetry(async () => {
@@ -109,7 +111,7 @@ export class FileService {
         }
 
         try {
-          const response = await this.api.listUnifiedFiles(targetPath, 'all');
+          const response = await this.api.listUnifiedFiles(actualTargetPath, 'all');
           if (response.success && response.data) {
             // 对文件列表进行排序
             const sortedFiles = this.sortFiles(response.data.files);
