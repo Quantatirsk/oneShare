@@ -190,6 +190,7 @@ export class FileService {
   public async deleteFile(filename: string): Promise<void> {
     const store = useAppStore.getState();
     const originalFiles = store.files;
+    const currentPath = store.currentPath;
     
     // 乐观更新：立即从列表中移除文件
     const optimisticFiles = originalFiles.filter(f => f.filename !== filename);
@@ -197,8 +198,8 @@ export class FileService {
 
     try {
       await this.executeWithRetry(() => this.api.deleteUnifiedFile(filename));
-      // 刷新文件列表确保数据一致性
-      await this.refreshFileList(true);
+      // 刷新文件列表确保数据一致性，保持当前路径
+      await this.refreshFileList(true, currentPath);
     } catch (error) {
       // 失败时回滚
       store.setFiles(originalFiles);
@@ -212,6 +213,7 @@ export class FileService {
   public async changeFilePermission(filename: string, isPublic: boolean): Promise<void> {
     const store = useAppStore.getState();
     const originalFiles = store.files;
+    const currentPath = store.currentPath;
     
     // 乐观更新：立即更新文件权限
     const optimisticFiles = originalFiles.map(f => 
@@ -221,8 +223,8 @@ export class FileService {
 
     try {
       await this.executeWithRetry(() => this.api.changeFilePermission(filename, isPublic));
-      // 刷新文件列表确保数据一致性
-      await this.refreshFileList(true);
+      // 刷新文件列表确保数据一致性，保持当前路径
+      await this.refreshFileList(true, currentPath);
     } catch (error) {
       // 失败时回滚
       store.setFiles(originalFiles);
@@ -236,6 +238,7 @@ export class FileService {
   public async batchDeleteFiles(filenames: string[]): Promise<{ success: number; failed: number }> {
     const store = useAppStore.getState();
     const originalFiles = store.files;
+    const currentPath = store.currentPath;
     
     // 乐观更新：立即从列表中移除文件
     const optimisticFiles = originalFiles.filter(f => !filenames.includes(f.filename));
@@ -243,8 +246,8 @@ export class FileService {
 
     try {
       const result = await this.executeWithRetry(() => this.api.batchDeleteUnifiedFiles(filenames));
-      // 刷新文件列表确保数据一致性
-      await this.refreshFileList(true);
+      // 刷新文件列表确保数据一致性，保持当前路径
+      await this.refreshFileList(true, currentPath);
       
       return {
         success: result.data?.deleted?.length || 0,
@@ -263,6 +266,7 @@ export class FileService {
   public async batchChangePermission(filenames: string[], isPublic: boolean): Promise<{ success: number; failed: number }> {
     const store = useAppStore.getState();
     const originalFiles = store.files;
+    const currentPath = store.currentPath;
     
     // 乐观更新：立即更新文件权限
     const optimisticFiles = originalFiles.map(f => 
@@ -272,8 +276,8 @@ export class FileService {
 
     try {
       const result = await this.executeWithRetry(() => this.api.batchChangePermission(filenames, isPublic));
-      // 刷新文件列表确保数据一致性
-      await this.refreshFileList(true);
+      // 刷新文件列表确保数据一致性，保持当前路径
+      await this.refreshFileList(true, currentPath);
       
       return {
         success: result.data?.updated?.length || 0,
