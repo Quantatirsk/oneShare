@@ -29,6 +29,8 @@ interface UseAdaptiveThinkingOptions {
   minShowDelay?: number;
   maxShowDelay?: number;
   baseScrollSpeed?: number;
+  containerHeight?: number; // 新增：容器高度
+  onContentHeightChange?: (height: number) => void; // 新增：内容高度变化回调
 }
 
 export function useAdaptiveThinking({
@@ -37,7 +39,9 @@ export function useAdaptiveThinking({
   enableAdaptive = true,
   minShowDelay = 500,
   maxShowDelay = 3000,
-  baseScrollSpeed = 60
+  baseScrollSpeed = 60,
+  containerHeight = 160,
+  onContentHeightChange
 }: UseAdaptiveThinkingOptions) {
   const [state, setState] = useState<AdaptiveThinkingState>({
     shouldShow: false,
@@ -293,7 +297,7 @@ export function useAdaptiveThinking({
     };
   }, [isGenerating, state.shouldShow, state.generationStartTime, calculateGenerationSpeed, calculateScrollSpeed]);
 
-  // 自适应滚动动画（仅在生成中运行）
+  // 增强的自适应滚动动画（支持容器尺寸感知）
   useEffect(() => {
     if (!state.shouldShow || !isGenerating || state.scrollSpeed === 0) {
       if (animationFrameRef.current) {
@@ -310,10 +314,31 @@ export function useAdaptiveThinking({
       const deltaTime = (now - lastTime) / 1000; // 转换为秒
       lastTime = now;
 
-      setState(prev => ({
-        ...prev,
-        adaptiveScrollPosition: prev.adaptiveScrollPosition + (prev.scrollSpeed * deltaTime)
-      }));
+      setState(prev => {
+        // 计算基础滚动增量
+        const scrollDelta = prev.scrollSpeed * deltaTime;
+        let newScrollPosition = prev.adaptiveScrollPosition + scrollDelta;
+        
+        // 如果有内容高度回调，通知外部组件当前的滚动状态
+        if (onContentHeightChange && content) {
+          // 估算当前内容应该占用的高度
+          const estimatedLines = content.split('\n').length;
+          const estimatedHeight = estimatedLines * 14; // 基于字体大小的估算
+          
+          // 如果内容高度超过容器高度，调整滚动位置
+          if (estimatedHeight > containerHeight) {
+            const maxScroll = estimatedHeight - containerHeight;
+            newScrollPosition = Math.min(newScrollPosition, maxScroll);
+          } else {
+            newScrollPosition = 0; // 内容不足容器高度时不滚动
+          }
+        }
+        
+        return {
+          ...prev,
+          adaptiveScrollPosition: Math.max(0, newScrollPosition)
+        };
+      });
 
       animationFrameRef.current = requestAnimationFrame(animate);
     };
@@ -326,7 +351,7 @@ export function useAdaptiveThinking({
         animationFrameRef.current = null;
       }
     };
-  }, [state.shouldShow, isGenerating, state.scrollSpeed, state.generationStartTime]);
+  }, [state.shouldShow, isGenerating, state.scrollSpeed, state.generationStartTime, containerHeight, onContentHeightChange, content]);
 
   // 清理函数
   useEffect(() => {

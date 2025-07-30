@@ -71,3 +71,4 @@ cache/
 # YoYo AI version control directory
 .yoyo/
 server/shares.json
+server/shares.json

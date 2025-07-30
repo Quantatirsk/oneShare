@@ -103,8 +103,8 @@ const ThinkingHeader = memo<{
         
         {/* 绝对定位的中间模型ID - 不受左右内容变化影响 */}
         {modelId && (
-          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none max-w-[150px] sm:max-w-[180px]">
-            <Badge variant="default" className="text-[10px] font-mono px-0.5 py-0 truncate max-w-full">
+          <div className="absolute left-1/2 top-0 bottom-0 flex items-center justify-center transform -translate-x-1/2 pointer-events-none max-w-[160px] sm:max-w-[180px]">
+            <Badge variant="default" className="text-[10px] font-mono px-1 py-0 truncate max-w-full">
               {cleanModelId(modelId)}
             </Badge>
           </div>
@@ -168,11 +168,17 @@ const ThinkingContent = memo<{
   enableAdaptive: boolean;
   adaptiveScrollPosition: number;
   adaptiveShouldShow: boolean;
-}>(({ content, isExpanded, scrollPosition, enableSmoothScroll, isGenerating, enableAdaptive, adaptiveScrollPosition, adaptiveShouldShow }) => {
+}>(({ content, isExpanded, scrollPosition: _scrollPosition, enableSmoothScroll, isGenerating, enableAdaptive, adaptiveScrollPosition, adaptiveShouldShow }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [contentElement, setContentElement] = useState<HTMLElement | null>(null); // 新增：使用 state 来存储内容元素引用
   const [expandedHeight, setExpandedHeight] = useState<number | null>(null);
   const prevContentLengthRef = useRef(0);
+  
+  // 新增：响应式滚动状态
+  const [responsiveScrollPosition, setResponsiveScrollPosition] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   
   // 内容预处理和延迟显示状态
   const [displayContent, setDisplayContent] = useState('');
@@ -182,12 +188,102 @@ const ThinkingContent = memo<{
   const animationRef = useRef<number>(0);
   const smoothScrollStarted = useRef(false);
 
-  // 选择使用哪种显示模式
+  // 新增：计算实际内容高度的函数
+  const calculateActualContentHeight = useCallback(() => {
+    if (!contentElement) return 0;
+    return contentElement.scrollHeight;
+  }, [contentElement]);
+
+  // 新增：基于实际DOM测量计算滚动位置
+  const calculateResponsiveScrollPosition = useCallback(() => {
+    if (!containerRef.current || !contentElement || isExpanded) return 0;
+    
+    const containerHeight = 160; // 固定容器高度
+    const contentHeight = calculateActualContentHeight();
+    
+    // 如果内容高度小于等于容器高度，不需要滚动
+    if (contentHeight <= containerHeight) return 0;
+    
+    // 滚动到底部，显示最新内容
+    const maxScrollPosition = contentHeight - containerHeight;
+    return Math.max(0, maxScrollPosition);
+  }, [calculateActualContentHeight, contentElement, isExpanded]);
+
+  // 智能选择显示模式和滚动位置
   const shouldShowContent = enableAdaptive ? adaptiveShouldShow : showContent;
-  const currentScrollPosition = enableAdaptive ? adaptiveScrollPosition : (enableSmoothScroll ? smoothScrollY : scrollPosition);
+  
+  // 智能滚动位置选择：优先使用响应式计算，在不可用时回退到其他模式
+  const currentScrollPosition = useMemo(() => {
+    if (enableAdaptive) {
+      // 自适应模式：使用自适应滚动位置，但在容器宽度变化时可能需要调整
+      return adaptiveScrollPosition;
+    } else if (enableSmoothScroll) {
+      // 平滑滚动模式
+      return smoothScrollY;
+    } else {
+      // 响应式模式：基于实际DOM测量
+      return responsiveScrollPosition;
+    }
+  }, [enableAdaptive, enableSmoothScroll, adaptiveScrollPosition, smoothScrollY, responsiveScrollPosition]);
   
   // 预处理内容
   const processedContent = useMemo(() => processContent(content), [content]);
+
+  // 新增：监听容器宽度变化
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
+    // 初始化 ResizeObserver
+    resizeObserverRef.current = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newWidth = entry.contentRect.width;
+        
+        // 宽度变化时重新计算滚动位置
+        if (newWidth !== containerWidth) {
+          setContainerWidth(newWidth);
+          
+          // 延迟重新计算，确保DOM更新完成
+          requestAnimationFrame(() => {
+            const newScrollPosition = calculateResponsiveScrollPosition();
+            setResponsiveScrollPosition(newScrollPosition);
+          });
+        }
+      }
+    });
+    
+    resizeObserverRef.current.observe(containerRef.current);
+    
+    return () => {
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
+    };
+  }, [containerWidth, calculateResponsiveScrollPosition]);
+
+  // 新增：内容变化时更新响应式滚动位置
+  useEffect(() => {
+    if (!enableAdaptive && !enableSmoothScroll && contentElement) {
+      // 延迟计算，确保内容渲染完成
+      const timeoutId = setTimeout(() => {
+        const newScrollPosition = calculateResponsiveScrollPosition();
+        setResponsiveScrollPosition(newScrollPosition);
+      }, 0);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [displayContent, enableAdaptive, enableSmoothScroll, calculateResponsiveScrollPosition, contentElement]);
+
+  // 新增：统一的滚动位置重置（生成开始时）
+  useEffect(() => {
+    if (isGenerating && !enableAdaptive) {
+      // 非自适应模式下重置滚动位置
+      setResponsiveScrollPosition(0);
+      if (!enableSmoothScroll) {
+        setSmoothScrollY(0);
+      }
+    }
+  }, [isGenerating, enableAdaptive, enableSmoothScroll]);
 
   // 重置状态当生成开始/结束时 - 仅在非自适应模式下使用
   useEffect(() => {
@@ -341,11 +437,17 @@ const ThinkingContent = memo<{
             </div>
           </div>
         ) : isExpanded ? (
-          <pre className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]">
+          <pre 
+            ref={setContentElement}
+            className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]"
+          >
             {displayContent || ''}
           </pre>
         ) : (
-          <div className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]">
+          <div 
+            ref={setContentElement}
+            className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]"
+          >
             {displayContent || ''}
           </div>
         )}
@@ -374,7 +476,7 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
   const [isExpanded, setIsExpanded] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 使用自适应thinking hook
+  // 使用自适应thinking hook（增强版，支持容器尺寸感知）
   const {
     shouldShow: adaptiveShouldShow,
     scrollPosition: adaptiveScrollPosition,
@@ -382,7 +484,14 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
   } = useAdaptiveThinking({
     content,
     isGenerating,
-    enableAdaptive
+    enableAdaptive,
+    containerHeight: 160,
+    onContentHeightChange: useCallback((height: number) => {
+      // 内容高度变化时的回调，可用于调试或进一步优化
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 [ThinkingModal] 内容高度变化:', height, 'px');
+      }
+    }, [])
   });
 
   // 获取性能统计信息
@@ -422,27 +531,29 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
   }, [isGenerating, isVisible]);
 
   // 流式内容显示和滚动 - 仅处理收起状态
+  // 注意：此逻辑现在主要用于非自适应模式，自适应模式在 ThinkingContent 中处理
   const prevContentRef = useRef('');
   
   useEffect(() => {
-    if (!isGenerating || isExpanded || !content || !isVisible) return;
+    if (!isGenerating || isExpanded || !content || !isVisible || enableAdaptive) return;
     
     // 只在内容增加时才滚动
     if (content.length > prevContentRef.current.length) {
-      // 计算内容高度和滚动位置
+      // 备用滚动逻辑：如果 DOM 测量不可用，回退到估算方法
       const lines = content.split('\n');
-      const containerHeight = 160; // 更新后的收起高度
-      const visibleLines = Math.floor(containerHeight / 20);
+      const containerHeight = 160;
+      const estimatedLineHeight = 14; // 更精确的行高估算（基于 text-[10px] 和 leading-relaxed）
+      const visibleLines = Math.floor(containerHeight / estimatedLineHeight);
       
       // 如果内容超出可视区域，滚动到最新内容
       if (lines.length > visibleLines) {
-        const targetScrollPosition = (lines.length - visibleLines) * 20;
+        const targetScrollPosition = (lines.length - visibleLines) * estimatedLineHeight;
         setScrollPosition(targetScrollPosition);
       }
     }
     
     prevContentRef.current = content;
-  }, [content, isGenerating, isExpanded, isVisible]);
+  }, [content, isGenerating, isExpanded, isVisible, enableAdaptive]);
 
   // 组件初始化或重新显示时重置状态 - 只对生成中的modal重置
   useEffect(() => {
