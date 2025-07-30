@@ -433,7 +433,7 @@ const ThinkingContent = memo<{
           <div className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px] flex items-center justify-center">
             <div className="text-center">
               <div className="mb-2">⏳</div>
-              <div>等待内容生成...</div>
+              <div>正在思考中...</div>
             </div>
           </div>
         ) : isExpanded ? (
@@ -485,13 +485,7 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
     content,
     isGenerating,
     enableAdaptive,
-    containerHeight: 160,
-    onContentHeightChange: useCallback((height: number) => {
-      // 内容高度变化时的回调，可用于调试或进一步优化
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔧 [ThinkingModal] 内容高度变化:', height, 'px');
-      }
-    }, [])
+    baseScrollSpeed: 80 // 恢复到基础速度
   });
 
   // 获取性能统计信息
