@@ -66,6 +66,12 @@ const ThinkingHeader = memo<{
   const config = getTypeConfig();
   const IconComponent = config.icon;
 
+  // 清理模型ID，移除前缀部分（如 "google/" -> ""）
+  const cleanModelId = (id: string) => {
+    const slashIndex = id.lastIndexOf('/');
+    return slashIndex !== -1 ? id.substring(slashIndex + 1) : id;
+  };
+
   return (
     <div className="border-b border-border">
       <div className="relative flex items-center justify-between px-3 py-1">
@@ -90,16 +96,16 @@ const ThinkingHeader = memo<{
               />
             )}
           </div>
-          <span className="text-sm font-medium text-foreground">
+          <span className="text-xs font-medium text-foreground">
             {isGenerating ? `${title} ${seconds}s` : '完成'}
           </span>
         </div>
         
         {/* 绝对定位的中间模型ID - 不受左右内容变化影响 */}
         {modelId && (
-          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-            <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
-              {modelId}
+          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none max-w-[100px] sm:max-w-[100px]">
+            <Badge variant="default" className="text-[10px] font-mono px-0.5 py-0 truncate max-w-full">
+              {cleanModelId(modelId)}
             </Badge>
           </div>
         )}
@@ -109,7 +115,7 @@ const ThinkingHeader = memo<{
             <div className="text-[10px] text-muted-foreground whitespace-nowrap">
               {performanceStats.generationSpeed > 0 && (
                 <span>
-                  {performanceStats.generationSpeed.toFixed(1)} Tps
+                  {performanceStats.generationSpeed.toFixed(1)} TPS
                 </span>
               )}
             </div>
