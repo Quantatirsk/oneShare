@@ -316,9 +316,25 @@ const CreatePageContent: React.FC = () => {
       try {
         const models = await fetchModelList();
         actions.setAvailableModels(models);
-        if (!state.api.selectedModel) {
-          const defaultModel = await getDefaultModel();
-          actions.setSelectedModel(defaultModel);
+        
+        if (!state.api.selectedModel && models.length > 0) {
+          // Get the default model from config
+          const configDefaultModel = await getDefaultModel();
+          
+          // Check if the default model exists in the available models
+          const isDefaultModelAvailable = models.some(model => model.id === configDefaultModel);
+          
+          // Use the config default if available, otherwise use the first model in the list
+          const selectedModel = isDefaultModelAvailable ? configDefaultModel : models[0].id;
+          
+          console.log('🤖 Model initialization:', {
+            configDefaultModel,
+            isDefaultModelAvailable,
+            selectedModel,
+            availableModels: models.map(m => m.id)
+          });
+          
+          actions.setSelectedModel(selectedModel);
         }
       } catch (error) {
         console.error('Failed to load models:', error);

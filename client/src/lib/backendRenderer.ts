@@ -288,7 +288,7 @@ export class BackendRenderer {
         const defaultModel = await getDefaultModel();
         const defaultOptions = {
           model: defaultModel,
-          temperature: 0.8,
+          temperature: 0.6,
           max_tokens: 8000
         };
         const config = { ...defaultOptions, ...options };
@@ -376,7 +376,7 @@ export class BackendRenderer {
         const defaultModel = await getDefaultModel();
         const defaultOptions = {
           model: defaultModel,
-          temperature: 0.8,
+          temperature: 0.6,
           max_tokens: 8000
         };
         const config = { ...defaultOptions, ...options };

@@ -328,7 +328,7 @@ export const callCodeGenerationStream = async (
   const baseCode = currentCode || (selectedTemplate ? selectedTemplate.code : '');
   
   // TSX代码生成提示词 - 直接输出代码
-  const getTSXSystemPrompt = (baseCode: string) => `你是资深的 React + TypeScript 开发专家。请根据需求生成完整的单文件 TSX 组件，直接输出代码本身，不需要多余解释或文档。
+  const getTSXSystemPrompt = (baseCode: string) => `你是资深的 React + TypeScript 开发专家。请根据需求生成完整的单文件 TSX 组件，请只输出代码本身，不要任何解释。
 
 ## 技术栈要求
 - **React 19** + TypeScript + TailwindCSS
@@ -375,10 +375,10 @@ const messages = [
 ];
 \`\`\`
 
-${baseCode ? `\n## 模板页面\n\`\`\`tsx\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出一个完整的 TSX 页面（内部可以包含多个子页面），不需要解释或文档：**`;;
+${baseCode ? `\n## 模板页面\n\`\`\`tsx\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出完整的 TSX 代码，确保仅仅输出代码：**\n\n`;;
 
   // HTML代码生成提示词 - 直接输出代码
-  const getHTMLSystemPrompt = (baseCode: string) => `你是资深的前端开发专家。请根据需求生成完整的 HTML 单文件应用，直接输出代码本身，不需要多余解释或文档。
+  const getHTMLSystemPrompt = (baseCode: string) => `你是资深的前端开发专家。请根据需求生成完整的 HTML 单文件应用，直接输出代码本身，不要多余的解释。
 
 ## 技术要求
 - **TailwindCSS** (通过 CDN 引入)
@@ -426,7 +426,7 @@ ${baseCode ? `\n## 模板页面\n\`\`\`tsx\n${baseCode}\n\`\`\`\n用户提供了
 - **语义化 HTML5 标签**
 - **TailwindCSS 响应式设计** (320px - 桌面端)
 - **错误处理机制**
-- **性能优化** (懒加载, 防抖节流)
+- **纯代码输出** 不包含任何解释性文字
 
 ## 样式要求
 - 主要使用 TailwindCSS 类名，最小化自定义 CSS
@@ -455,7 +455,7 @@ const messages = [
 ];
 \`\`\`
 
-${baseCode ? `\n## 模板页面\n\`\`\`html\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出完整的、可运行的单文件 HTML 应用(内部可以包含多个子页面）代码，不需要解释或文档：**`;
+${baseCode ? `\n## 模板页面\n\`\`\`html\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请确保仅仅输出完整的、可运行的 HTML 代码：**\n\n`;
 
   // 根据代码语言选择提示词
   const codeSystemPrompt = codeLang === 'html' 

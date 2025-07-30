@@ -112,6 +112,21 @@ export const InputArea: React.FC<InputAreaProps> = ({
     setSelectedModel(value);
   }, [setSelectedModel]);
 
+  // 检查当前选中的模型是否在可用模型列表中，如果不在则自动选择第一个可用模型
+  useEffect(() => {
+    if (api.availableModels.length > 0 && api.selectedModel) {
+      const isCurrentModelAvailable = api.availableModels.some(model => model.id === api.selectedModel);
+      if (!isCurrentModelAvailable) {
+        console.log('🚨 Current selected model not available, switching to first available:', {
+          currentModel: api.selectedModel,
+          availableModels: api.availableModels.map(m => m.id),
+          switchingTo: api.availableModels[0].id
+        });
+        setSelectedModel(api.availableModels[0].id);
+      }
+    }
+  }, [api.availableModels, api.selectedModel, setSelectedModel]);
+
   // 缓存开关切换函数
   const handleSwitchChange = useCallback((checked: boolean) => {
     setRightPanelMode(checked ? 'code' : 'chat');
@@ -208,19 +223,27 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 className="h-6 px-2 text-xs font-normal text-muted-foreground hover:text-foreground min-w-0 overflow-hidden"
               >
                 <Bot className="w-3 h-3 flex-shrink-0" />
-                <span className="ml-1 truncate min-w-0">{api.selectedModel}</span>
+                <span className="ml-1 truncate min-w-0">
+                  {api.selectedModel || (api.availableModels.length > 0 ? api.availableModels[0].id : '选择模型')}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48 max-h-48 overflow-y-auto">
-              {api.availableModels.map((model) => (
-                <DropdownMenuItem 
-                  key={model.id}
-                  onClick={() => handleModelChange(model.id)}
-                  className="text-xs cursor-pointer"
-                >
-                  <span className="truncate">{model.id}</span>
+              {api.availableModels.length > 0 ? (
+                api.availableModels.map((model) => (
+                  <DropdownMenuItem 
+                    key={model.id}
+                    onClick={() => handleModelChange(model.id)}
+                    className="text-xs cursor-pointer"
+                  >
+                    <span className="truncate">{model.id}</span>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem disabled className="text-xs">
+                  <span className="text-muted-foreground">加载中...</span>
                 </DropdownMenuItem>
-              ))}
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           
