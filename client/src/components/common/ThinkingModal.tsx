@@ -103,7 +103,7 @@ const ThinkingHeader = memo<{
         
         {/* 绝对定位的中间模型ID - 不受左右内容变化影响 */}
         {modelId && (
-          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none max-w-[100px] sm:max-w-[100px]">
+          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none max-w-[150px] sm:max-w-[180px]">
             <Badge variant="default" className="text-[10px] font-mono px-0.5 py-0 truncate max-w-full">
               {cleanModelId(modelId)}
             </Badge>
