@@ -122,15 +122,15 @@ export const CreativePromptsSection: React.FC<CreativePromptsSectionProps> = ({
       {/* 卡片滑动容器 */}
       <div className="relative flex flex-col items-center">
         <div 
-          className="relative h-[330px] w-full overflow-y-auto"
+          className="relative h-[280px] w-full overflow-y-auto"
         >
           <div
-            className="flex flex-col p-2"
+            className="flex flex-col px-1"
           >
             {prompts.map((prompt, index) => (
               <div
                 key={prompt.id}
-                className="mb-2.5"
+                className="mb-1.5"
               >
                 <CompactPromptCard
                   prompt={{ ...prompt, relativeIndex: index - currentIndex, absoluteIndex: index }}
@@ -182,7 +182,7 @@ const CompactPromptCard: React.FC<CompactPromptCardProps> = ({
         transition: { type: "spring", stiffness: 400, damping: 30 }
       }}
       whileTap={{ scale: 0.95 }}
-      className={`relative cursor-pointer border bg-background transition-all duration-300 h-[100px] w-full ${
+      className={`relative cursor-pointer border bg-background transition-all duration-300 h-[80px] w-full ${
         isSelected 
           ? 'border-primary shadow-md' 
           : 'border-border hover:border-border/70'
@@ -190,7 +190,7 @@ const CompactPromptCard: React.FC<CompactPromptCardProps> = ({
       onClick={onClick}
     >
       {/* Content */}
-      <div className="relative p-3 h-full flex">
+      <div className="relative p-2 h-full flex">
         {/* Icon */}
         <div className={`flex-shrink-0 w-8 h-8 bg-muted border border-border flex items-center justify-center mr-3 ${
           isSelected ? 'bg-primary/10 border-primary/30' : ''

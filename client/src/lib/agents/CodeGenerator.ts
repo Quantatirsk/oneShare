@@ -2,6 +2,7 @@ import { callCodeGenerationStream } from '@/lib/llmWrapper';
 import type { Message } from '@/types';
 import type { RequirementAnalysisResult } from './RequirementAnalyzer';
 import { extractCleanCode, type CodeLanguage } from '@/utils/codeCleaningUtils';
+import { getDefaultModelSync } from '@/lib/llmConfig';
 
 export interface CodeGenerationSession {
   id: string;
@@ -59,7 +60,7 @@ export class CodeGenerator {
   async generateCode(
     callbacks: CodeGenerationCallbacks,
     currentCode: string = '',
-    model: string = 'moonshotai/kimi-k2-instruct',
+    model: string = getDefaultModelSync(),
     codeLang: 'tsx' | 'html' = 'tsx'
   ): Promise<void> {
     if (!this.currentSession) {
@@ -128,7 +129,7 @@ export class CodeGenerator {
     userMessage: string,
     callbacks: CodeGenerationCallbacks,
     currentCode: string = '',
-    model: string = 'moonshotai/kimi-k2-instruct',
+    model: string = getDefaultModelSync(),
     codeLang: 'tsx' | 'html' = 'tsx'
   ): Promise<void> {
     if (!this.currentSession) {

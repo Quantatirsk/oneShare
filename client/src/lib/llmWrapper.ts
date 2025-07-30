@@ -72,7 +72,7 @@ export const fetchLLMConfig = async () => {
     console.error('获取 LLM 配置失败:', error);
     return {
       default_model: 'google/gemini-2.5-flash-lite',
-      temperature: 0.8,
+      temperature: 0.6,
       max_tokens: 32000,
       available: false
     };
@@ -328,7 +328,7 @@ export const callCodeGenerationStream = async (
   const baseCode = currentCode || (selectedTemplate ? selectedTemplate.code : '');
   
   // TSX代码生成提示词 - 直接输出代码
-  const getTSXSystemPrompt = (baseCode: string) => `你是资深的 React + TypeScript 开发专家。请根据需求生成完整的单文件 TSX 组件。
+  const getTSXSystemPrompt = (baseCode: string) => `你是资深的 React + TypeScript 开发专家。请根据需求生成完整的单文件 TSX 组件，直接输出代码本身，不需要多余解释或文档。
 
 ## 技术栈要求
 - **React 19** + TypeScript + TailwindCSS
@@ -375,10 +375,10 @@ const messages = [
 ];
 \`\`\`
 
-${baseCode ? `\n## 模板页面\n\`\`\`tsx\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出一个完整的 TSX 页面（内部可以包含多个子页面），不要任何解释或文档：**`;;
+${baseCode ? `\n## 模板页面\n\`\`\`tsx\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出一个完整的 TSX 页面（内部可以包含多个子页面），不需要解释或文档：**`;;
 
   // HTML代码生成提示词 - 直接输出代码
-  const getHTMLSystemPrompt = (baseCode: string) => `你是资深的前端开发专家。请根据需求生成完整的 HTML 单文件应用。
+  const getHTMLSystemPrompt = (baseCode: string) => `你是资深的前端开发专家。请根据需求生成完整的 HTML 单文件应用，直接输出代码本身，不需要多余解释或文档。
 
 ## 技术要求
 - **TailwindCSS** (通过 CDN 引入)
@@ -455,7 +455,7 @@ const messages = [
 ];
 \`\`\`
 
-${baseCode ? `\n## 模板页面\n\`\`\`html\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出完整的、可运行的单文件 HTML 应用(内部可以包含多个子页面）代码，不要任何解释或文档：**`;
+${baseCode ? `\n## 模板页面\n\`\`\`html\n${baseCode}\n\`\`\`\n用户提供了上述模板，请在此模板上进行内容填充。\n\n` : ''}**重要：请直接输出完整的、可运行的单文件 HTML 应用(内部可以包含多个子页面）代码，不需要解释或文档：**`;
 
   // 根据代码语言选择提示词
   const codeSystemPrompt = codeLang === 'html' 

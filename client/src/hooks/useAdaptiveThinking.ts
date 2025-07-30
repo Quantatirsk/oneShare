@@ -37,7 +37,7 @@ export function useAdaptiveThinking({
   enableAdaptive = true,
   minShowDelay = 500,
   maxShowDelay = 3000,
-  baseScrollSpeed = 80
+  baseScrollSpeed = 60
 }: UseAdaptiveThinkingOptions) {
   const [state, setState] = useState<AdaptiveThinkingState>({
     shouldShow: false,
@@ -117,7 +117,7 @@ export function useAdaptiveThinking({
     // 根据token生成速度调整滚动速度
     // token速度通常比字符速度小，所以需要调整系数
     // 假设平均1个token ≈ 3.5个字符，调整滚动速度映射
-    const adaptedSpeed = Math.max(40, Math.min(200, currentTokenSpeed * 2.8));
+    const adaptedSpeed = Math.max(30, Math.min(150, currentTokenSpeed * 2.0));
     return adaptedSpeed;
   }, [calculateGenerationSpeed, baseScrollSpeed]);
 
@@ -261,24 +261,29 @@ export function useAdaptiveThinking({
       return;
     }
 
-    // 每秒更新一次速度显示
+    // 每2.5秒更新一次速度显示，减少频繁更新导致的频闪
     speedUpdateTimerRef.current = setInterval(() => {
       const currentSpeed = calculateGenerationSpeed();
       const currentScrollSpeed = calculateScrollSpeed();
       
       setState(prev => {
-        // 使用指数移动平均进行平滑处理，避免数值跳动
-        const smoothingFactor = 0.3;
+        // 使用更保守的指数移动平均进行平滑处理，避免数值跳动
+        const smoothingFactor = 0.2;
         const smoothedSpeed = prev.generationSpeed === 0 ? currentSpeed : 
           prev.generationSpeed * (1 - smoothingFactor) + currentSpeed * smoothingFactor;
+        
+        // 只有当速度变化超过15%时才更新滚动速度，避免微小变化导致频闪
+        const speedChangeThreshold = 0.15;
+        const speedDiff = Math.abs(currentScrollSpeed - prev.scrollSpeed) / Math.max(prev.scrollSpeed, 1);
+        const shouldUpdateScrollSpeed = speedDiff > speedChangeThreshold;
         
         return {
           ...prev,
           generationSpeed: smoothedSpeed,
-          scrollSpeed: currentScrollSpeed
+          scrollSpeed: shouldUpdateScrollSpeed ? currentScrollSpeed : prev.scrollSpeed
         };
       });
-    }, 1000);
+    }, 2500);
 
     return () => {
       if (speedUpdateTimerRef.current) {

@@ -30,7 +30,7 @@ async function fetchLLMConfig(): Promise<LLMConfig> {
     // 返回默认配置
     return {
       default_model: 'google/gemini-2.5-flash-lite',
-      temperature: 0.8,
+      temperature: 0.6,
       max_tokens: 32000,
       available: false
     };

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { extractCleanCode } from '@/utils/codeCleaningUtils';
 import { useAdaptiveThinking } from '@/hooks/useAdaptiveThinking';
+import { Badge } from '@/components/ui/badge';
 
 interface ThinkingModalProps {
   isVisible?: boolean;
@@ -67,7 +68,7 @@ const ThinkingHeader = memo<{
 
   return (
     <div className="border-b border-border">
-      <div className="flex items-center justify-between px-3 py-1">
+      <div className="relative flex items-center justify-between px-3 py-1">
         <div className="flex items-center gap-3">
           <div className="relative">
             <IconComponent className={cn("w-4 h-4", config.color)} />
@@ -90,25 +91,25 @@ const ThinkingHeader = memo<{
             )}
           </div>
           <span className="text-sm font-medium text-foreground">
-            {title} {isGenerating && `${seconds}秒`}
+            {isGenerating ? `${title} ${seconds}s` : '完成'}
           </span>
         </div>
         
-        {/* 中间显示模型ID */}
+        {/* 绝对定位的中间模型ID - 不受左右内容变化影响 */}
         {modelId && (
-          <div className="flex-1 flex justify-center">
-            <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+          <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+            <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">
               {modelId}
-            </span>
+            </Badge>
           </div>
         )}
         
         <div className="flex items-center gap-2">
           {showPerformanceStats && performanceStats && (
-            <div className="text-xs text-muted-foreground">
+            <div className="text-[10px] text-muted-foreground whitespace-nowrap">
               {performanceStats.generationSpeed > 0 && (
                 <span>
-                  {performanceStats.generationSpeed.toFixed(1)} token/s
+                  {performanceStats.generationSpeed.toFixed(1)} Tps
                 </span>
               )}
             </div>
@@ -120,10 +121,9 @@ const ThinkingHeader = memo<{
               e.stopPropagation();
               onToggleExpand();
             }}
-            className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-sm cursor-pointer bg-transparent border-none p-1"
+            className="flex items-center text-muted-foreground hover:text-foreground transition-colors text-sm cursor-pointer bg-transparent border-none p-1"
             style={{ pointerEvents: 'auto', zIndex: 1000 }}
           >
-            <span>{isExpanded ? '收起' : '展开'}</span>
             {isExpanded ? (
               <ChevronUp className="w-4 h-4" />
             ) : (
@@ -246,7 +246,7 @@ const ThinkingContent = memo<{
       return;
     }
 
-    const SCROLL_SPEED = 100; // 每秒向上移动100px
+    const SCROLL_SPEED = 70; // 每秒向上移动70px，降低滚动速度减少频闪
     let lastTime = Date.now();
 
     const animate = () => {

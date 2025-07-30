@@ -576,7 +576,7 @@ const CreatePageContent: React.FC = () => {
       <ResizableHandle withHandle />
       
       {/* Right Side - Chat and Code Panel */}
-      <ResizablePanel defaultSize={25} minSize={20}>
+      <ResizablePanel defaultSize={32} minSize={20}>
         <div className="flex flex-col bg-background h-full">
           {/* Overlapping Content Area */}
           <div className="flex-1 relative overflow-hidden">

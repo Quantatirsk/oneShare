@@ -18,7 +18,7 @@ export class HTMLRenderer {
         const llmConfig = await fetchLLMConfig();
         const defaultOptions = {
           model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.8,
+          temperature: llmConfig?.temperature || 0.6,
           max_tokens: llmConfig?.max_tokens || 8000
         };
         const config = { ...defaultOptions, ...options };
@@ -66,7 +66,7 @@ export class HTMLRenderer {
         const llmConfig = await fetchLLMConfig();
         const defaultOptions = {
           model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.8,
+          temperature: llmConfig?.temperature || 0.6,
           max_tokens: llmConfig?.max_tokens || 8000
         };
         const config = { ...defaultOptions, ...options };
@@ -112,7 +112,7 @@ export class HTMLRenderer {
         const llmConfig = await fetchLLMConfig();
         const defaultOptions = {
           model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.8,
+          temperature: llmConfig?.temperature || 0.6,
           max_tokens: llmConfig?.max_tokens || 8000
         };
         const config = { ...defaultOptions, ...options };
@@ -199,7 +199,7 @@ export class HTMLRenderer {
         const llmConfig = await fetchLLMConfig();
         const defaultOptions = {
           model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.8,
+          temperature: llmConfig?.temperature || 0.6,
           max_tokens: llmConfig?.max_tokens || 8000
         };
         const config = { ...defaultOptions, ...options };

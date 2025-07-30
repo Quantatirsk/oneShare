@@ -6,6 +6,7 @@
  */
 
 import { FileServerAPI } from './api';
+import { getDefaultModel } from './llmConfig';
 
 export interface RenderOptions {
   container?: string;
@@ -284,8 +285,9 @@ export class BackendRenderer {
     if (event.data.type === 'claude-complete-request') {
       try {
         const { requestId, prompt, options = {} } = event.data;
+        const defaultModel = await getDefaultModel();
         const defaultOptions = {
-          model: "moonshotai/kimi-k2-instruct",
+          model: defaultModel,
           temperature: 0.8,
           max_tokens: 8000
         };
@@ -329,8 +331,9 @@ export class BackendRenderer {
     } else if (event.data.type === 'llm-complete-request') {
       try {
         const { requestId, messages, options = {} } = event.data;
+        const defaultModel = await getDefaultModel();
         const defaultOptions = {
-          model: "moonshotai/kimi-k2-instruct"
+          model: defaultModel
         };
         const config = { ...defaultOptions, ...options };
         
@@ -370,8 +373,9 @@ export class BackendRenderer {
     } else if (event.data.type === 'claude-stream-request') {
       try {
         const { requestId, prompt, options = {} } = event.data;
+        const defaultModel = await getDefaultModel();
         const defaultOptions = {
-          model: "moonshotai/kimi-k2-instruct",
+          model: defaultModel,
           temperature: 0.8,
           max_tokens: 8000
         };
@@ -452,8 +456,9 @@ export class BackendRenderer {
     } else if (event.data.type === 'llm-stream-request') {
       try {
         const { requestId, messages, options = {} } = event.data;
+        const defaultModel = await getDefaultModel();
         const defaultOptions = {
-          model: "moonshotai/kimi-k2-instruct"
+          model: defaultModel
         };
         const config = { ...defaultOptions, ...options };
         
