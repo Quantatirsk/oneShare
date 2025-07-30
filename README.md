@@ -79,16 +79,19 @@
 ### 1. 克隆项目
 ```bash
 git clone <repository-url>
-cd file-server
+cd oneShare
 ```
 
 ### 2. 配置环境变量
 ```bash
-# 复制环境配置模板
-cp env.example .env
+# 复制环境配置模板（如果存在）
+cp server/env.example server/.env
+
+# 或创建新的环境配置文件
+touch server/.env
 
 # 编辑配置文件
-nano .env
+nano server/.env
 ```
 
 必要配置项：
@@ -115,30 +118,41 @@ cd ../server/compile_service/node_compiler && npm install
 # 启动后端 (包含编译服务)
 cd server && python main.py
 
-# 启动前端开发服务器
+# 新终端：启动前端开发服务器
 cd client && pnpm run dev
 ```
 
 #### 生产部署
 ```bash
-# 构建前端
+# 方式一：构建前端并通过后端提供服务
 cd client && pnpm run build
+cd ../server && python main.py
 
-# Docker 一键部署
+# 方式二：Docker 一键部署
 docker-compose up -d
 ```
 
 ### 5. 访问应用
+
+#### 开发模式访问地址
+- **前端开发服务器**: http://localhost:3000
+- **后端 API 服务**: http://localhost:8000
+
+#### 生产模式访问地址  
 - **主应用**: http://localhost:8000
 - **应用创建**: http://localhost:8000/create
 - **应用画廊**: http://localhost:8000/app
 
+#### Docker 部署访问地址
+- **主应用**: http://localhost:8090 (默认端口映射)
+
+> 💡 开发模式下前端运行在 3000 端口，生产模式前端静态文件通过后端 8000 端口提供服务  
 > 💡 首次启动会自动初始化 SQLite 数据库和存储目录
 
 ## ⚙️ 配置说明
 
 ### 环境变量配置
-在项目根目录 `.env` 文件中配置：
+在 `server/.env` 文件中配置：
 
 ```env
 # 服务器配置
@@ -185,7 +199,7 @@ SQLITE_DB_PATH=./server/storage/metadata.db  # SQLite数据库路径
 使用 `docker-compose.yml` 进行容器化部署：
 
 ```yaml
-# 自定义端口映射
+# 自定义端口映射 (默认配置)
 ports:
   - "8090:80"  # 外部端口:内部端口
 
@@ -193,6 +207,10 @@ ports:
 volumes:
   - ./server/storage:/app/storage
   - ./server/shares.json:/app/shares.json
+
+# 环境配置
+env_file:
+  - .env
 ```
 
 ## 📡 API 文档
@@ -303,7 +321,7 @@ curl -X POST \
 ## 🏢 项目结构
 
 ```
-file-server/
+oneShare/
 ├── server/                      # FastAPI 后端服务
 │   ├── main.py                 # 应用入口 + 端口管理
 │   ├── routes.py               # 文件管理路由
@@ -364,7 +382,7 @@ file-server/
 ├── docker-compose.yml         # Docker编排配置
 ├── nginx.conf                # Nginx反向代理配置
 ├── supervisord.conf          # 进程管理配置
-├── env.example               # 环境变量模板
+├── server/env.example        # 环境变量模板
 └── README.md                 # 项目文档
 ```
 
@@ -462,7 +480,7 @@ cd server && python run_tests.py
 ### Docker 容器化部署
 ```bash
 # 1. 构建镜像
-docker build -t file-server:latest .
+docker build -t oneShare:latest .
 
 # 2. 使用 Docker Compose 部署
 docker-compose up -d
@@ -504,11 +522,15 @@ server {
 
 ### 环境变量管理
 ```bash
-# 生产环境配置
+# 生产环境配置 (server/.env)
 AUTH_TOKEN=strong-production-token
 LLM_API_KEY=production-api-key
-SQLITE_DB_PATH=/app/data/metadata.db
-FILE_STORAGE_PATH=/app/data/storage
+SQLITE_DB_PATH=./server/storage/metadata.db
+FILE_STORAGE_PATH=./server/storage
+
+# Docker 环境 (根目录 .env)
+PYTHONUNBUFFERED=1
+TZ=Asia/Shanghai
 ```
 
 ## ⚡ 性能优化
@@ -538,7 +560,7 @@ FILE_STORAGE_PATH=/app/data/storage
 ### 监控和日志
 ```bash
 # 应用监控
-docker stats file-server
+docker stats oneShare
 docker-compose logs --tail=100 -f
 
 # 文件系统监控
@@ -546,7 +568,7 @@ df -h /app/storage
 du -sh /app/storage/*
 
 # 数据库监控
-sqlite3 metadata.db ".dbinfo"
+sqlite3 /app/storage/metadata.db ".dbinfo"
 ```
 
 ## 🤝 贡献指南
