@@ -117,7 +117,7 @@ export function useAdaptiveThinking({
     // 根据token生成速度调整滚动速度
     // token速度通常比字符速度小，所以需要调整系数
     // 假设平均1个token ≈ 3.5个字符，调整滚动速度映射
-    const adaptedSpeed = Math.max(25, Math.min(200, currentTokenSpeed * 1.3));
+    const adaptedSpeed = Math.max(25, Math.min(200, currentTokenSpeed * 1.5));
     return adaptedSpeed;
   }, [calculateGenerationSpeed, baseScrollSpeed]);
 
