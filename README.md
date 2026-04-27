@@ -490,6 +490,23 @@ docker-compose ps
 docker-compose logs -f app
 ```
 
+### 交互式构建与推送
+仓库提供了构建脚本，可交互式选择镜像 tag、目标平台架构和输出方式：
+
+```bash
+# 交互式构建
+./scripts/build-image.sh
+
+# 多架构构建并推送到 docker-compose.yml 中配置的镜像仓库
+./scripts/build-image.sh --multi --push --tag 1.1.0
+
+# 仅构建当前 amd64 平台并加载到本地 Docker
+./scripts/build-image.sh --amd64 --load --tag local-test
+
+# 多架构打包为 OCI 归档
+./scripts/build-image.sh --multi --oci --archive dist/docker/oneshare.oci.tar
+```
+
 ### nginx 反向代理配置
 ```nginx
 server {
