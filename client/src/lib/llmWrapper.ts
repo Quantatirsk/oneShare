@@ -11,6 +11,18 @@ interface LLMApiRequest {
   max_tokens?: number;
 }
 
+interface LLMSSEData {
+  content?: string;
+  done?: boolean;
+  error?: string;
+}
+
+interface LLMSSEHandlers {
+  onContent: (content: string) => void;
+  onDone: () => void;
+  onError: (error: string) => void;
+}
+
 /**
  * 模型类型定义
  */
@@ -136,6 +148,81 @@ export const callOpenAI = async (
   }
 };
 
+export const parseLLMSSELine = (line: string): LLMSSEData | null => {
+  const trimmedLine = line.trim();
+  if (!trimmedLine || !trimmedLine.startsWith('data:')) {
+    return null;
+  }
+
+  const payload = trimmedLine.slice(5).trim();
+  if (!payload) {
+    return null;
+  }
+
+  if (payload === '[DONE]') {
+    return { done: true };
+  }
+
+  try {
+    return JSON.parse(payload);
+  } catch (e) {
+    console.warn('解析流数据失败:', line);
+    return null;
+  }
+};
+
+export const handleLLMSSELine = (line: string, handlers: LLMSSEHandlers): boolean => {
+  const data = parseLLMSSELine(line);
+  if (!data) {
+    return false;
+  }
+
+  if (typeof data.content === 'string' && data.content.length > 0) {
+    handlers.onContent(data.content);
+  } else if (data.done) {
+    handlers.onDone();
+    return true;
+  } else if (data.error) {
+    handlers.onError(data.error);
+    return true;
+  }
+
+  return false;
+};
+
+export const readLLMStream = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  handlers: LLMSSEHandlers
+): Promise<void> => {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (handleLLMSSELine(line, handlers)) {
+        return;
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer && handleLLMSSELine(buffer, handlers)) {
+    return;
+  }
+
+  handlers.onDone();
+};
+
 /**
  * 流式调用 OpenAI API
  */
@@ -182,37 +269,11 @@ export const callOpenAIStream = async (
       throw new Error('无法获取响应流');
     }
 
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.content) {
-              onChunk(data.content);
-            } else if (data.done) {
-              onComplete?.();
-              return;
-            } else if (data.error) {
-              onError?.(data.error);
-              return;
-            }
-          } catch (e) {
-            console.warn('解析流数据失败:', line);
-          }
-        }
-      }
-    }
+    await readLLMStream(reader, {
+      onContent: onChunk,
+      onDone: () => onComplete?.(),
+      onError: (error) => onError?.(error)
+    });
   } catch (error) {
     console.error('流式API调用失败:', error);
     onError?.(error instanceof Error ? error.message : '流式调用失败');

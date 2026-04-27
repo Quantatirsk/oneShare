@@ -97,7 +97,12 @@ class LLMService:
                 max_tokens=request.max_tokens or LLM_MAX_TOKENS
             )
             
-            content = response.choices[0].message.content or ""
+            choices = getattr(response, "choices", None) or []
+            if not choices:
+                content = ""
+            else:
+                message = getattr(choices[0], "message", None)
+                content = getattr(message, "content", None) or ""
             
             return LLMResponse(
                 success=True,
@@ -134,8 +139,16 @@ class LLMService:
             )
             
             async for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    content = chunk.choices[0].delta.content
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+
+                delta = getattr(choices[0], "delta", None)
+                if delta is None:
+                    continue
+
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
                     # 使用 JSON 模块确保正确的格式
                     data = {"content": content}
                     yield f"data: {json.dumps(data)}\n\n"

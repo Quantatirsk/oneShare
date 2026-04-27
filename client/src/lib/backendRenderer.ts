@@ -7,6 +7,7 @@
 
 import { FileServerAPI } from './api';
 import { getDefaultModel } from './llmConfig';
+import { readLLMStream } from './llmWrapper';
 
 export interface RenderOptions {
   container?: string;
@@ -403,49 +404,29 @@ export class BackendRenderer {
           throw new Error("无法获取响应流");
         }
         
-        const decoder = new TextDecoder();
-        let buffer = "";
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'claude-stream-response',
-                    requestId,
-                    chunk: data.content
-                  }, '*');
-                } else if (data.done) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'claude-stream-response',
-                    requestId,
-                    done: true
-                  }, '*');
-                  return;
-                } else if (data.error) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'claude-stream-response',
-                    requestId,
-                    error: data.error
-                  }, '*');
-                  return;
-                }
-              } catch (e) {
-                console.warn("解析流数据失败:", line);
-              }
-            }
+        await readLLMStream(reader, {
+          onContent: (content) => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'claude-stream-response',
+              requestId,
+              chunk: content
+            }, '*');
+          },
+          onDone: () => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'claude-stream-response',
+              requestId,
+              done: true
+            }, '*');
+          },
+          onError: (error) => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'claude-stream-response',
+              requestId,
+              error
+            }, '*');
           }
-        }
+        });
       } catch (error) {
         this.iframeElement?.contentWindow?.postMessage({
           type: 'claude-stream-response',
@@ -482,49 +463,29 @@ export class BackendRenderer {
           throw new Error("无法获取响应流");
         }
         
-        const decoder = new TextDecoder();
-        let buffer = "";
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'llm-stream-response',
-                    requestId,
-                    chunk: data.content
-                  }, '*');
-                } else if (data.done) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'llm-stream-response',
-                    requestId,
-                    done: true
-                  }, '*');
-                  return;
-                } else if (data.error) {
-                  this.iframeElement?.contentWindow?.postMessage({
-                    type: 'llm-stream-response',
-                    requestId,
-                    error: data.error
-                  }, '*');
-                  return;
-                }
-              } catch (e) {
-                console.warn("解析流数据失败:", line);
-              }
-            }
+        await readLLMStream(reader, {
+          onContent: (content) => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'llm-stream-response',
+              requestId,
+              chunk: content
+            }, '*');
+          },
+          onDone: () => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'llm-stream-response',
+              requestId,
+              done: true
+            }, '*');
+          },
+          onError: (error) => {
+            this.iframeElement?.contentWindow?.postMessage({
+              type: 'llm-stream-response',
+              requestId,
+              error
+            }, '*');
           }
-        }
+        });
       } catch (error) {
         this.iframeElement?.contentWindow?.postMessage({
           type: 'llm-stream-response',
