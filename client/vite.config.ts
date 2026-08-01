@@ -40,6 +40,13 @@ export default defineConfig({
     port: parseInt(process.env.VITE_PORT || '3000'),
     open: true,
     allowedHosts: ['demo.teea.cn'],
+    // Keep the browser on the same /api/ai contract in development and production.
+    proxy: {
+      '/api/ai': {
+        target: process.env.VITE_AI_RUNTIME_URL || 'http://127.0.0.1:8001',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',

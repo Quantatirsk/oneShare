@@ -1,4 +1,5 @@
-import { callRequirementAnalysisStream } from '@/lib/llmWrapper';
+import { callRequirementAnalysisStream } from '@/lib/aiPrompts';
+import { isAiRequestAborted } from '@/lib/aiClient';
 import type { Message } from '@/types';
 
 export interface RequirementAnalysisResult {
@@ -20,10 +21,12 @@ export class RequirementAnalyzer {
   async analyzeRequirement(
     userRequirement: string,
     onChunk: (content: string, result: RequirementAnalysisResult) => void,
+    onThinking?: (content: string) => void,
     onComplete?: (result: RequirementAnalysisResult) => void,
     onError?: (error: string, result: RequirementAnalysisResult) => void,
-    model: string = 'gpt-4.1-nano',
-    selectedTemplate?: any
+    model: string = '',
+    selectedTemplate?: any,
+    signal?: AbortSignal,
   ): Promise<void> {
     const analysisId = Date.now().toString();
     
@@ -46,6 +49,7 @@ export class RequirementAnalyzer {
           this.updateHistory(analysisId, result);
           onChunk(chunk, result);
         },
+        onThinking,
         () => {
           result.status = 'completed';
           this.updateHistory(analysisId, result);
@@ -58,9 +62,13 @@ export class RequirementAnalyzer {
           onError?.(error, result);
         },
         model,
-        selectedTemplate
+        selectedTemplate,
+        signal,
       );
     } catch (error) {
+      if (isAiRequestAborted(error)) {
+        throw error;
+      }
       result.status = 'error';
       result.error = error instanceof Error ? error.message : '分析失败';
       this.updateHistory(analysisId, result);

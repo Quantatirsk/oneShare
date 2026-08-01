@@ -1,7 +1,7 @@
 import { useReducer, useCallback } from 'react';
 import { Template } from '@/data/templates';
 import { ConversationStage } from '@/lib/agents/ConversationManager';
-import { OpenAIModel } from '@/lib/llmWrapper';
+import type { AiModel } from '@/lib/aiClient';
 
 export interface Message {
   id: string;
@@ -51,7 +51,7 @@ export interface CreatePageState {
   // API State
   api: {
     isSaving: boolean;
-    availableModels: OpenAIModel[];
+    availableModels: AiModel[];
     selectedModel: string;
   };
 }
@@ -78,7 +78,7 @@ type CreatePageAction =
   | { type: 'SET_LAST_RENDERED'; payload: string }
   | { type: 'SET_PREVIEW_HAS_CONTENT'; payload: boolean }
   | { type: 'SET_IS_SAVING'; payload: boolean }
-  | { type: 'SET_AVAILABLE_MODELS'; payload: OpenAIModel[] }
+  | { type: 'SET_AVAILABLE_MODELS'; payload: AiModel[] }
   | { type: 'SET_SELECTED_MODEL'; payload: string }
   | { type: 'RESET_CONVERSATION' }
   | { type: 'RESET_CODE' };
@@ -302,7 +302,7 @@ export function useCreatePageState() {
     setIsSaving: useCallback((saving: boolean) => 
       dispatch({ type: 'SET_IS_SAVING', payload: saving }), []),
     
-    setAvailableModels: useCallback((models: OpenAIModel[]) => 
+    setAvailableModels: useCallback((models: AiModel[]) =>
       dispatch({ type: 'SET_AVAILABLE_MODELS', payload: models }), []),
     
     setSelectedModel: useCallback((model: string) => 

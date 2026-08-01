@@ -10,7 +10,7 @@ import { getSharedFileContent, type ShareInfo } from '@/lib/shareUtils';
 import { FileServerAPI } from '@/lib/api';
 import { useAppStore } from '@/stores/appStore';
 import { ModernMarkdownViewer } from '@/components/ModernMarkdownViewer';
-import { callOpenAIStream } from '@/lib/llmWrapper';
+import { streamText } from '@/lib/aiClient';
 
 interface TocItem {
   id: string;
@@ -244,7 +244,7 @@ export function ShareViewPage() {
       const prompt = `${content}\n\n以上是一篇文档的内容，请为读者介绍这篇文档的一句话概要，结合emoji简要陈列文档的主要信息或观点，语言简洁明了。`;
       const messages = [{ role: 'user' as const, content: prompt }];
       
-      await callOpenAIStream(
+      await streamText(
         messages,
         (chunk) => {
           setSummaryContent(prev => prev + chunk);

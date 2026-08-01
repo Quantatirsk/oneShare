@@ -47,7 +47,6 @@ next-env.d.ts
 
 # 依赖
 node_modules/
-.pnpm-store/
 .npm
 .yarn
 .yarnrc

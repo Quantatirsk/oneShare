@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { callOpenAI } from '@/lib/llmWrapper';
+import { generateText } from '@/lib/aiClient';
 
 // 生成4个随机字母的后缀
 const generateRandomSuffix = (): string => {
@@ -17,7 +17,7 @@ export const generateSmartFileName = async (codeContent: string): Promise<string
     // 取代码的前5000字符进行分析
     const codeToAnalyze = codeContent.slice(0, 5000);
     
-    const aiResponse = await callOpenAI([
+    const aiResponse = await generateText([
       {
         role: 'system',
         content: `你是一个专业的代码分析师，专门根据代码内容生成合适的中文文件名。你需要：

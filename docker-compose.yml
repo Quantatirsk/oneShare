@@ -18,7 +18,7 @@ services:
       - TZ=Asia/Shanghai  # 设置时区为上海
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health && curl -f http://127.0.0.1:8001/healthz"]
       interval: 10s
       timeout: 5s
       retries: 3

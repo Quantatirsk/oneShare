@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Code2, 
@@ -42,8 +42,10 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 // import { ErrorBoundaryWrapper } from '@/components/common/ErrorBoundary';
 
 // APIs and Utilities
-import { fetchModelList } from '@/lib/llmWrapper';
-import { getDefaultModel } from '@/lib/llmConfig';
+import { fetchAiModelCatalog } from '@/lib/aiClient';
+
+const MAX_MODEL_LOAD_ATTEMPTS = 3;
+const MODEL_LOAD_RETRY_DELAY_MS = 1_500;
 
 // Alert component
 const TopAlert: React.FC = () => {
@@ -225,12 +227,14 @@ const CreatePageContent: React.FC = () => {
     chatMessagesRef, 
     handleSendMessage, 
     handleStartGeneration, 
+    handleCancelGeneration,
     handleClearChat,
     handleResetConversationManager,
     handleRetryMessage,
     handleRetryCodeGeneration
   } = useConversationFlow({ 
-    previewContainerRef
+    previewContainerRef,
+    renderPreview,
   });
   const { 
     handleCategoryChange, 
@@ -311,37 +315,60 @@ const CreatePageContent: React.FC = () => {
   // Handle dock close - removed close button
 
   // Load available models
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const models = await fetchModelList();
-        actions.setAvailableModels(models);
+  const [modelLoadFailed, setModelLoadFailed] = useState(false);
+  const [modelLoadAttempts, setModelLoadAttempts] = useState(0);
+  const loadModels = useCallback(async (refresh = false) => {
+    setModelLoadFailed(false);
+    try {
+      const catalog = await fetchAiModelCatalog(refresh);
+      const models = catalog.models;
+      actions.setAvailableModels(models);
+
+      if (!state.api.selectedModel && models.length > 0) {
+        // Get the default model from config
+        const configDefaultModel = catalog.defaultModel;
+
+        // Check if the default model exists in the available models
+        const isDefaultModelAvailable = models.some(model => model.id === configDefaultModel);
+
+        // Use the config default if available, otherwise use the first model in the list
+        const selectedModel = isDefaultModelAvailable ? configDefaultModel : models[0].id;
+
+        console.log('🤖 Model initialization:', {
+          configDefaultModel,
+          isDefaultModelAvailable,
+          selectedModel,
+          availableModels: models.map(m => m.id)
+        });
         
-        if (!state.api.selectedModel && models.length > 0) {
-          // Get the default model from config
-          const configDefaultModel = await getDefaultModel();
-          
-          // Check if the default model exists in the available models
-          const isDefaultModelAvailable = models.some(model => model.id === configDefaultModel);
-          
-          // Use the config default if available, otherwise use the first model in the list
-          const selectedModel = isDefaultModelAvailable ? configDefaultModel : models[0].id;
-          
-          console.log('🤖 Model initialization:', {
-            configDefaultModel,
-            isDefaultModelAvailable,
-            selectedModel,
-            availableModels: models.map(m => m.id)
-          });
-          
-          actions.setSelectedModel(selectedModel);
-        }
-      } catch (error) {
-        console.error('Failed to load models:', error);
+        actions.setSelectedModel(selectedModel);
       }
-    };
-    loadModels();
+      setModelLoadAttempts(0);
+    } catch (error) {
+      setModelLoadFailed(true);
+      setModelLoadAttempts((attempts) => attempts + 1);
+      console.error('Failed to load models:', error);
+    }
   }, [actions, state.api.selectedModel]);
+
+  useEffect(() => {
+    void loadModels();
+  }, [loadModels]);
+
+  useEffect(() => {
+    if (!modelLoadFailed || modelLoadAttempts >= MAX_MODEL_LOAD_ATTEMPTS) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void loadModels(true);
+    }, MODEL_LOAD_RETRY_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [loadModels, modelLoadAttempts, modelLoadFailed]);
+
+  const retryModels = useCallback(() => {
+    setModelLoadAttempts(0);
+    void loadModels(true);
+  }, [loadModels]);
 
   // Collapse template card when sending message
   const handleSendMessageWithCollapse = (message: string) => {
@@ -535,7 +562,13 @@ const CreatePageContent: React.FC = () => {
           
           {/* Input Area */}
           <div className="shrink-0">
-            <InputArea onSendMessage={handleSendMessageWithCollapse} isMobile={isMobile} />
+            <InputArea
+              onSendMessage={handleSendMessageWithCollapse}
+              onStopGenerating={handleCancelGeneration}
+              isMobile={isMobile}
+              modelLoadFailed={modelLoadFailed}
+              onRetryModels={retryModels}
+            />
           </div>
           
         </div>
@@ -622,7 +655,13 @@ const CreatePageContent: React.FC = () => {
           </div>
           
           {/* Input Area */}
-          <InputArea onSendMessage={handleSendMessageWithCollapse} isMobile={isMobile} />
+          <InputArea
+            onSendMessage={handleSendMessageWithCollapse}
+            onStopGenerating={handleCancelGeneration}
+            isMobile={isMobile}
+            modelLoadFailed={modelLoadFailed}
+            onRetryModels={retryModels}
+          />
         </div>
       </ResizablePanel>
       

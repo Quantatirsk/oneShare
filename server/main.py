@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import HOST, PORT
 from routes import register_routes
-import llm_routes
 from compile_service import compile_router
 from template_routes import register_template_routes
 
@@ -94,7 +93,6 @@ async def health_check():
 
 # 注册路由
 register_routes(app)
-app.include_router(llm_routes.router)
 
 # 注册编译服务路由
 app.include_router(compile_router)

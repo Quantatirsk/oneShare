@@ -14,12 +14,13 @@ import {
 
 interface UseConversationFlowProps {
   previewContainerRef: React.RefObject<HTMLDivElement>;
-  renderPreview: (code: string, codeLang: 'tsx' | 'html', forceRender?: boolean) => Promise<void>;
+  renderPreview: (code: string, codeLang: 'tsx' | 'html', forceRender?: boolean) => Promise<import('@/hooks/useCodeRenderer').RenderOutcome>;
 }
 
 export function useConversationFlow({ 
-  previewContainerRef
-}: Omit<UseConversationFlowProps, 'renderPreview'>) {
+  previewContainerRef,
+  renderPreview,
+}: UseConversationFlowProps) {
   const { toast } = useToast();
   const { conversation, addMessage, updateMessage, setConversationStage, resetConversation } = useConversationState();
   const { 
@@ -39,7 +40,14 @@ export function useConversationFlow({
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const callbacksSetRef = useRef<boolean>(false);
   const activeAnalysisRef = useRef<string | null>(null);
+  const activeThinkingRef = useRef<{ id: string; content: string } | null>(null);
   const analysisMessagesRef = useRef<Map<string, { userMsgId: string; assistantMsgId: string }>>(new Map());
+
+  useEffect(() => {
+    conversationManager.setRenderer({
+      validate: (source, language) => renderPreview(source, language, true),
+    });
+  }, [renderPreview]);
 
   // 初始化对话管理器 - 避免重复设置回调
   useEffect(() => {
@@ -51,9 +59,17 @@ export function useConversationFlow({
     conversationManager.setCallbacks({
       onStageChange: (stage) => {
         setConversationStage(stage);
+
+        if (stage === 'analyzing' || stage === 'generating') {
+          activeThinkingRef.current = null;
+        } else if (activeThinkingRef.current) {
+          updateMessage(activeThinkingRef.current.id, { isStreaming: false });
+          activeThinkingRef.current = null;
+        }
         
         if (stage === 'generating') {
-          setIsStreaming(true);
+          // Agent may emit thinking before the first code delta. Keep code UI hidden until then.
+          setIsStreaming(false);
           setStreamingCode('');
           streamingAccumulatorRef.current = '';
           
@@ -71,7 +87,7 @@ export function useConversationFlow({
               previewContainerRef.current.innerHTML = '';
             }
           }
-        } else if (stage === 'completed' || stage === 'error') {
+        } else if (stage === 'validating' || stage === 'completed' || stage === 'error') {
           setIsStreaming(false);
           setStreamingCode('');
         }
@@ -115,6 +131,27 @@ export function useConversationFlow({
         }
       },
 
+      onThinkingChunk: (chunk) => {
+        const activeThinking = activeThinkingRef.current;
+        if (!activeThinking) {
+          const id = `thinking-${Date.now()}`;
+          activeThinkingRef.current = { id, content: chunk };
+          addMessage({
+            id,
+            role: 'assistant',
+            content: chunk,
+            timestamp: new Date(),
+            type: 'thinking',
+            isStreaming: true,
+            modelId: conversationManager.getCurrentModel() || api.selectedModel,
+          });
+          return;
+        }
+
+        activeThinking.content += chunk;
+        updateMessage(activeThinking.id, { content: activeThinking.content, isStreaming: true });
+      },
+
       onAnalysisComplete: (analysis, modelId?: string) => {
         // 标记流式完成
         const messageIds = analysisMessagesRef.current.get(analysis.id);
@@ -132,12 +169,6 @@ export function useConversationFlow({
         }
       },
 
-      onUserMessage: (message) => {
-        // 用户消息现在在 handleSendMessage 中立即添加，这里不再重复添加
-        // 保留回调以保持接口兼容性，但不执行任何操作
-        console.log('onUserMessage callback triggered (no-op):', message);
-      },
-
       onCodeChunk: (chunk) => {
         // 如果这是第一个chunk且accumulator为空，说明开始新的生成
         if (streamingAccumulatorRef.current === '') {
@@ -152,6 +183,7 @@ export function useConversationFlow({
         }
         
         streamingAccumulatorRef.current += chunk;
+        setIsStreaming(true);
         setStreamingCode(streamingAccumulatorRef.current);
         setCurrentCode(streamingAccumulatorRef.current);
       },
@@ -219,6 +251,22 @@ export function useConversationFlow({
         }
       },
 
+      onRecovery: (attempt, failure) => {
+        addMessage({
+          id: `recovery-${Date.now()}-${attempt}`,
+          role: 'assistant',
+          content: `正在自动修复 ${attempt}/2：${failure.message}`,
+          timestamp: new Date(),
+          type: 'conversation',
+          isStreaming: false,
+          modelId: conversationManager.getCurrentModel() || api.selectedModel,
+        });
+      },
+
+      onRecoveryExhausted: (failure) => {
+        toast({ title: '自动修复已停止', description: failure.message, variant: 'destructive', duration: 4000 });
+      },
+
       onError: (error) => {
         toast({
           title: "错误",
@@ -272,6 +320,11 @@ export function useConversationFlow({
 
     try {
       // 检查当前状态，决定是分析需求还是继续对话
+      if (conversation.stage === 'completed' || (conversation.stage === 'error' && conversationManager.hasCodeSession())) {
+        setConversationStage('generating');
+        conversationManager.setCodeLang(code.language);
+        return await conversationManager.continueConversation(message, api.selectedModel);
+      }
       if (conversation.stage === 'idle' || conversation.stage === 'error') {
         // 立即设置状态为分析中，显示加载动画
         setConversationStage('analyzing');
@@ -286,16 +339,6 @@ export function useConversationFlow({
         
         // 开始需求分析
         return await conversationManager.startRequirementAnalysis(message, api.selectedModel);
-      } else if (conversation.stage === 'completed') {
-        // 立即设置状态为生成中，显示加载动画
-        setConversationStage('generating');
-        
-        // 确保在继续对话前同步语言设置  
-        console.log('🔧 [SendMessage] 继续对话前同步语言设置:', code.language);
-        conversationManager.setCodeLang(code.language);
-        
-        // 继续对话，修改代码
-        return await conversationManager.continueConversation(message, code.current, api.selectedModel);
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -310,7 +353,7 @@ export function useConversationFlow({
         duration: 3000,
       });
     }
-  }, [conversation.stage, api.selectedModel, code.current, code.language, toast, addMessage, setConversationStage]);
+  }, [conversation.stage, api.selectedModel, code.language, toast, addMessage, setConversationStage]);
 
   // 开始代码生成的函数
   const handleStartGeneration = useCallback(async (editedContent?: string) => {
@@ -335,6 +378,10 @@ export function useConversationFlow({
       });
     }
   }, [code.current, code.language, api.selectedModel, toast]);
+
+  const handleCancelGeneration = useCallback(() => {
+    conversationManager.cancelActiveRequest();
+  }, []);
 
   // 清空聊天记录
   const handleClearChat = useCallback(() => {
@@ -430,7 +477,7 @@ export function useConversationFlow({
       // 如果正在生成，先停止
       if (conversation.stage === 'generating') {
         console.log('🔄 [RetryCodeGeneration] Stopping current generation...');
-        // 这里可以添加停止当前生成的逻辑
+        conversationManager.cancelActiveRequest();
       }
 
       // 清理当前的流式状态和之前生成的代码
@@ -478,6 +525,7 @@ export function useConversationFlow({
     chatMessagesRef,
     handleSendMessage,
     handleStartGeneration,
+    handleCancelGeneration,
     handleClearChat,
     handleResetConversationManager,
     handleRetryMessage,

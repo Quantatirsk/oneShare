@@ -6,7 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { getSharedFileContent, type ShareInfo } from '@/lib/shareUtils';
 import { FileServerAPI } from '@/lib/api';
 import { useAppStore } from '@/stores/appStore';
-import { fetchLLMConfig, readLLMStream } from '@/lib/llmWrapper';
+import { respondToIframeAiRequest } from '@/lib/iframeAiBridge';
 
 export function HtmlPreviewPage() {
   const { shareId } = useParams<{ shareId: string }>();
@@ -21,121 +21,10 @@ export function HtmlPreviewPage() {
   
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  // Claude API 处理函数
   const handleClaudeRequest = useCallback(async (event: MessageEvent) => {
-    if (event.data.type === 'claude-complete-request') {
-      try {
-        const { requestId, prompt, options = {} } = event.data;
-        const llmConfig = await fetchLLMConfig();
-        const defaultOptions = {
-          model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.6,
-          max_tokens: llmConfig?.max_tokens || 8000
-        };
-        const config = { ...defaultOptions, ...options };
-        
-        const messages = [{ role: "user" as const, content: prompt }];
-        
-        const response = await fetch("/api/llm/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages,
-            model: config.model,
-            temperature: config.temperature,
-            max_tokens: config.max_tokens
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        if (!result.success) {
-          throw new Error(result.error || "API调用失败");
-        }
-        
-        // 发送响应回iframe
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'claude-complete-response',
-          requestId,
-          result: result.data || ""
-        }, '*');
-        
-      } catch (error) {
-        // 发送错误回iframe
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'claude-complete-response',
-          requestId: event.data.requestId,
-          error: error instanceof Error ? error.message : "API调用失败"
-        }, '*');
-      }
-    } else if (event.data.type === 'claude-stream-request') {
-      try {
-        const { requestId, prompt, options = {} } = event.data;
-        const llmConfig = await fetchLLMConfig();
-        const defaultOptions = {
-          model: llmConfig?.default_model || "google/gemini-2.5-flash-lite",
-          temperature: llmConfig?.temperature || 0.6,
-          max_tokens: llmConfig?.max_tokens || 8000
-        };
-        const config = { ...defaultOptions, ...options };
-        
-        const messages = [{ role: "user" as const, content: prompt }];
-        
-        const response = await fetch("/api/llm/chat/stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages,
-            model: config.model,
-            temperature: config.temperature,
-            max_tokens: config.max_tokens
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("无法获取响应流");
-        }
-        
-        await readLLMStream(reader, {
-          onContent: (content) => {
-            iframeRef.current?.contentWindow?.postMessage({
-              type: 'claude-stream-response',
-              requestId,
-              chunk: content
-            }, '*');
-          },
-          onDone: () => {
-            iframeRef.current?.contentWindow?.postMessage({
-              type: 'claude-stream-response',
-              requestId,
-              done: true
-            }, '*');
-          },
-          onError: (error) => {
-            iframeRef.current?.contentWindow?.postMessage({
-              type: 'claude-stream-response',
-              requestId,
-              error
-            }, '*');
-          }
-        });
-      } catch (error) {
-        // 发送错误回iframe
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'claude-stream-response',
-          requestId: event.data.requestId,
-          error: error instanceof Error ? error.message : "流式调用失败"
-        }, '*');
-      }
-    }
+    await respondToIframeAiRequest(event.data, (payload) => {
+      iframeRef.current?.contentWindow?.postMessage(payload, '*');
+    });
   }, []);
 
   // 监听来自iframe的消息

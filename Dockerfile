@@ -1,15 +1,26 @@
 # 构建阶段 - 前端依赖
-FROM node:20-slim AS frontend-deps
+FROM node:22-slim AS frontend-deps
 WORKDIR /app
-RUN npm install -g pnpm
-COPY client/package.json client/pnpm-lock.yaml ./
-RUN pnpm install
+COPY client/package.json client/package-lock.json ./
+RUN npm ci
 
 # 构建阶段 - 前端构建
 FROM frontend-deps AS frontend-builder
 COPY client/ .
-RUN pnpm build
+RUN npm run build
 RUN ls -la dist/
+
+FROM node:22-slim AS agent-runtime-deps
+WORKDIR /app
+COPY agent-runtime/package.json agent-runtime/package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM node:22-slim AS agent-runtime-builder
+WORKDIR /app
+COPY agent-runtime/package.json agent-runtime/package-lock.json ./
+RUN npm ci
+COPY agent-runtime/ .
+RUN npm run build
 
 # 构建阶段 - 后端依赖
 FROM python:3.11-slim AS backend-deps
@@ -36,7 +47,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \
@@ -48,8 +59,13 @@ COPY --from=backend-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/
 # 复制后端代码
 COPY --from=backend-builder /app /app
 
+COPY --from=agent-runtime-deps /app/node_modules /app/agent-runtime/node_modules
+COPY --from=agent-runtime-builder /app/package.json /app/agent-runtime/package.json
+COPY --from=agent-runtime-builder /app/dist /app/agent-runtime/dist
+
 # 安装 Node.js 编译器依赖
-RUN cd /app/compile_service/node_compiler && npm install --production
+RUN cd /app/compile_service/node_compiler \
+    && npm ci --omit=dev
 
 # 验证 Node.js 和编译器依赖是否正确安装
 RUN node --version && npm --version \
@@ -76,7 +92,7 @@ RUN nginx -t
 
 # 添加健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost/health || exit 1
+    CMD curl -f http://localhost/health && curl -f http://127.0.0.1:8001/healthz || exit 1
 
 EXPOSE 80
 

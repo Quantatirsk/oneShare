@@ -20,7 +20,13 @@ client/.env*
 client/npm-debug.log*
 client/yarn-debug.log*
 client/yarn-error.log*
-client/pnpm-debug.log*
+
+# Node.js runtimes
+agent-runtime/node_modules
+agent-runtime/dist
+agent-runtime/npm-debug.log*
+server/compile_service/node_compiler/node_modules
+server/compile_service/node_compiler/npm-debug.log*
 
 # 后端（server）
 server/__pycache__
@@ -55,4 +61,4 @@ server/dist
 # Docker
 .docker
 docker-compose*.yml
-Dockerfile* 
+Dockerfile*

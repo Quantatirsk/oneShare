@@ -14,7 +14,8 @@ import {
 } from '@/components/ui/sheet';
 import { TemplateSelector } from './TemplateSelector';
 import { createUserTemplate, isUserAuthenticated } from '@/data/templates';
-import { callOpenAI } from '@/lib/llmWrapper';
+import { generateText } from '@/lib/aiClient';
+import { getPreviewOverlay } from '@/lib/preview-overlay-state';
 
 // Template Library Button Component
 const TemplateLibraryButton: React.FC<{
@@ -109,7 +110,7 @@ const SaveAsTemplateButton: React.FC<{
     setIsAIFilling(true);
     try {
       // 调用LLM API
-      const aiResponse = await callOpenAI([
+      const aiResponse = await generateText([
         {
           role: 'system',
           content: `你是一个专业的前端代码分析师，专门分析代码并提取模板元数据。你需要：
@@ -360,12 +361,17 @@ export const PreviewRenderer: React.FC<PreviewRendererProps> = ({
   const { templates } = useTemplateState();
   const { api } = useAPIState();
   
-  // 状态优先级：模板加载 > 代码生成 > 渲染中 > 空状态
-  const showTemplateLoadingState = templates.isLoading;
-  // 修改：只有在没有已渲染内容时才显示生成状态loader
-  const showGeneratingState = conversation.stage === 'generating' && !templates.isLoading && !code.hasPreviewContent;
-  const showRenderingState = code.isRendering && !templates.isLoading && conversation.stage !== 'generating';
-  const showEmptyState = !code.hasPreviewContent && !code.current && !code.isRendering && conversation.stage !== 'generating' && !templates.isLoading;
+  const overlay = getPreviewOverlay({
+    stage: conversation.stage,
+    templateLoading: templates.isLoading,
+    hasPreviewContent: code.hasPreviewContent,
+    currentCode: code.current,
+    isRendering: code.isRendering,
+  });
+  const showTemplateLoadingState = overlay === 'template';
+  const showGeneratingState = overlay === 'generating';
+  const showRenderingState = overlay === 'rendering';
+  const showEmptyState = overlay === 'empty';
 
   return (
     <div className="flex-1 flex flex-col h-full">

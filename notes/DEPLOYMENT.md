@@ -7,7 +7,7 @@ A modern file server with enhanced sharing capabilities, featuring specialized p
 ### Prerequisites
 - Docker & Docker Compose
 - Git
-- (Optional) Node.js 20+ & pnpm for local development
+- (Optional) Node.js 20+ & npm for local development
 
 ### 1. Clone and Setup
 ```bash

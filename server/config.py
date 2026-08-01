@@ -36,11 +36,3 @@ INDEX_HTML_PATH = os.path.join(os.path.dirname(__file__), "../client/dist/index.
 
 os.makedirs(FILE_STORAGE_PATH, exist_ok=True)
 os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
-
-
-# LLM服务配置
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
-LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "google/gemini-2.5-flash-lite")
-LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.6"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "32000"))

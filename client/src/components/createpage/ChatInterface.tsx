@@ -64,6 +64,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const { ui, setTemplateCardCollapsed } = useUIState();
   const { code, setCurrentCode, setLastRendered, setHasPreviewContent } = useCodeState();
   const { api } = useAPIState();
+  const hasStreamingCode = code.isStreaming && code.streaming.trim().length > 0;
   
   // 调试：监控UI状态变化
   console.log('🔄 [ChatInterface] UI状态更新:', { currentlyReviewedMessageId: ui.currentlyReviewedMessageId });
@@ -86,14 +87,14 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   
   // 监听生成阶段变化，记录使用的模型ID
   React.useEffect(() => {
-    if (conversation.stage === 'generating') {
+    if (['generating', 'validating', 'repairing'].includes(conversation.stage)) {
       setCurrentGenerationModelId(api.selectedModel);
     }
   }, [conversation.stage, api.selectedModel]);
   
-  // 当ThinkingModal显示时自动滚动到最底部，让thinking卡片显示在视野中
+  // Only scroll for the code panel after the first code delta arrives.
   React.useEffect(() => {
-    if (conversation.stage === 'generating' && chatMessagesRef.current) {
+    if (hasStreamingCode && chatMessagesRef.current) {
       console.log('🔥 [ChatInterface] Starting auto scroll to bottom for ThinkingModal');
       
       const scrollToBottom = (retryCount = 0) => {
@@ -144,7 +145,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       scrollToBottom(0);
       setTimeout(() => scrollToBottom(0), 300);
     }
-  }, [conversation.stage]);
+  }, [hasStreamingCode]);
 
   const handleTemplateRemove = () => {
     setSelectedTemplate(null);
@@ -602,6 +603,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 ) : (
                   <div className="w-full">
                     <div className="w-full">
+                      {message.type === 'thinking' && (
+                        <details
+                          className="rounded-md border border-sky-200 bg-sky-50/60 text-xs text-slate-700"
+                          open={message.isStreaming || undefined}
+                        >
+                          <summary className="cursor-pointer px-3 py-2 font-medium text-sky-800">
+                            {message.isStreaming ? '正在思考...' : '思考过程'}
+                          </summary>
+                          <div className="border-t border-sky-200 px-3 py-2 whitespace-pre-wrap leading-relaxed">
+                            {message.content}
+                          </div>
+                        </details>
+                      )}
+
                       {/* 分析消息使用原有的 Markdown 卡片样式 */}
                       {message.type === 'analysis' && (
                         <div className="rounded-lg bg-blue-50 border border-blue-200">
@@ -735,7 +750,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                   return (
                                     <Button
                                       onClick={onRetryCodeGeneration}
-                                      disabled={conversation.stage === 'generating'}
+                                      disabled={['generating', 'validating', 'repairing'].includes(conversation.stage)}
                                       className="h-9 px-4 bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 hover:from-orange-600 hover:via-red-600 hover:to-pink-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
                                       title="重新生成代码"
                                     >
@@ -776,7 +791,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                       )}
                       
                       {/* 只有普通消息才显示传统样式 */}
-                      {message.type !== 'analysis' && !(message.type === 'code' && message.content.includes('```')) && (
+                      {message.type !== 'analysis' && message.type !== 'thinking' && !(message.type === 'code' && message.content.includes('```')) && (
                         <div className="rounded-lg bg-muted">
                           <div className="p-2.5">
                             <p className="text-xs leading-relaxed">{message.content}</p>
@@ -856,8 +871,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 )}
               </div>
             ))}
-            {/* 代码生成时的实时 ThinkingModal - 只在生成中显示 */}
-            {conversation.stage === 'generating' && (
+            {/* Code output appears only after the first code delta; thinking renders in its own message. */}
+            {hasStreamingCode && (
               <div className="space-y-3">
                 {/* 传统的生成提示 */}
                 <div className="flex justify-start">

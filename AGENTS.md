@@ -19,16 +19,16 @@ python server.py
 ### Running the React Client
 ```bash
 # Install dependencies
-pnpm install
+npm install
 
 # Start development server
-pnpm run dev
+npm run dev
 
 # Build for production
-pnpm run build
+npm run build
 
 # Preview production build
-pnpm run preview
+npm run preview
 ```
 
 ### Dependencies
@@ -37,18 +37,18 @@ pnpm run preview
 cd server && pip install -r requirements.txt
 
 # Install React dependencies
-cd client && pnpm install
+cd client && npm install
 ```
 
 ### Environment Setup
 ```bash
 # Copy environment template and configure
-cp server/env.example server/.env
+cp .env.example .env
 # Edit the .env file with appropriate values (AUTH_TOKEN, etc.)
 ```
 
 ## Notes and Guidelines
-- Always use pnpm instead of npm
+- Use npm as the package manager.
 - 静态资源通过后端 `/assets` 端点提供，nginx 负责代理转发
 
 ## Architecture Overview

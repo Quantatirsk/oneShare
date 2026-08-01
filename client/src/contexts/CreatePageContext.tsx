@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import { Template } from '@/data/templates';
 import { ConversationStage } from '@/lib/agents/ConversationManager';
-import { OpenAIModel } from '@/lib/llmWrapper';
+import type { AiModel } from '@/lib/aiClient';
 
 // 消息接口
 export interface Message {
@@ -9,7 +9,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  type?: 'analysis' | 'code' | 'conversation';
+  type?: 'analysis' | 'code' | 'conversation' | 'thinking';
   isStreaming?: boolean;
   analysisId?: string;
   modelId?: string; // 执行任务时使用的模型ID
@@ -59,7 +59,7 @@ export interface CreatePageState {
   // API 层状态
   api: {
     selectedModel: string;
-    availableModels: OpenAIModel[];
+    availableModels: AiModel[];
     isSaving: boolean;
     isLoading: boolean;
   };
@@ -111,7 +111,7 @@ export type CreatePageAction =
   
   // API Actions
   | { type: 'API_SET_SELECTED_MODEL'; payload: string }
-  | { type: 'API_SET_AVAILABLE_MODELS'; payload: OpenAIModel[] }
+  | { type: 'API_SET_AVAILABLE_MODELS'; payload: AiModel[] }
   | { type: 'API_SET_IS_SAVING'; payload: boolean }
   | { type: 'API_SET_IS_LOADING'; payload: boolean }
   
@@ -398,7 +398,7 @@ interface CreatePageActions {
   
   // API Actions
   setSelectedModel: (model: string) => void;
-  setAvailableModels: (models: OpenAIModel[]) => void;
+  setAvailableModels: (models: AiModel[]) => void;
   setIsSaving: (saving: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   

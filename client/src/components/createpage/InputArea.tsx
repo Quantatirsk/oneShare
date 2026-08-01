@@ -7,8 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowUp, Bot } from 'lucide-react';
-import { LottieLoader } from '@/components/common/LottieAnimations';
+import { ArrowUp, Bot, Square } from 'lucide-react';
 import { 
   useConversationState, 
   useUIState, 
@@ -31,12 +30,18 @@ const Html5Icon = ({ className = "" }) => (
 
 interface InputAreaProps {
   onSendMessage: (message: string) => void;
+  onStopGenerating?: () => void;
   isMobile?: boolean;
+  modelLoadFailed?: boolean;
+  onRetryModels?: () => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
   onSendMessage,
-  isMobile = false
+  onStopGenerating,
+  isMobile = false,
+  modelLoadFailed = false,
+  onRetryModels,
 }) => {
   const { conversation, setInputText, setSelectedPrompt } = useConversationState();
   const { ui, setRightPanelMode } = useUIState();
@@ -80,11 +85,17 @@ export const InputArea: React.FC<InputAreaProps> = ({
   }, [localInputText, onSendMessage, setInputText, setSelectedPrompt]);
 
   // 使用 useMemo 优化计算，只在依赖变化时重新计算
-  const isDisabled = useMemo(() => {
-    return conversation.stage === 'analyzing' || 
-           conversation.stage === 'generating' || 
-           !localInputText.trim();
-  }, [conversation.stage, localInputText]);
+  const isRunning = ['analyzing', 'generating', 'validating', 'repairing'].includes(conversation.stage);
+  const isDisabled = useMemo(() => !isRunning && !localInputText.trim(), [isRunning, localInputText]);
+
+  const handlePrimaryAction = useCallback(() => {
+    if (isRunning) {
+      onStopGenerating?.();
+      return;
+    }
+
+    handleSend();
+  }, [handleSend, isRunning, onStopGenerating]);
 
   // 缓存输入处理函数 - 使用本地状态
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -239,6 +250,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                     <span className="truncate">{model.id}</span>
                   </DropdownMenuItem>
                 ))
+              ) : modelLoadFailed ? (
+                <DropdownMenuItem onSelect={onRetryModels} className="text-xs cursor-pointer">
+                  <span className="text-muted-foreground">加载失败，点击重试</span>
+                </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem disabled className="text-xs">
                   <span className="text-muted-foreground">加载中...</span>
@@ -249,13 +264,15 @@ export const InputArea: React.FC<InputAreaProps> = ({
           
           {/* Send Button */}
           <Button
-            onClick={handleSend}
-            disabled={isDisabled}
+            onClick={handlePrimaryAction}
+            disabled={isRunning ? !onStopGenerating : isDisabled}
             size="sm"
             className="h-6 px-2 text-xs flex items-center justify-center flex-shrink-0"
+            aria-label={isRunning ? '停止生成' : '发送消息'}
+            title={isRunning ? '停止生成' : '发送消息'}
           >
-            {(conversation.stage === 'analyzing' || conversation.stage === 'generating') ? (
-              <LottieLoader size={12} />
+            {isRunning ? (
+              <Square className="w-3 h-3" fill="currentColor" />
             ) : (
               <ArrowUp className="w-3 h-3" />
             )}

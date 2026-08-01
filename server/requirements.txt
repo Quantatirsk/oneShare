@@ -7,4 +7,3 @@ aiofiles
 aiosqlite
 websockets
 aiohttp
-openai

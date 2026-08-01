@@ -587,7 +587,6 @@ function isTrailingExplanatoryLine(line: string, expectedLanguage?: CodeLanguage
     // 安装和运行指令
     /^npm (install|run|start)/i,
     /^yarn (install|run|start)/i,
-    /^pnpm (install|run|start)/i,
     /^cd /i,
     /^git clone/i,
     

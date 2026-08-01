@@ -67,7 +67,7 @@ export interface DragState {
 }
 
 export interface Message {
-  role: 'system' | 'user' | 'assistant' | 'function';
+  role: 'system' | 'user' | 'assistant';
   content: string;
   name?: string;
 }

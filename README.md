@@ -25,7 +25,7 @@
 - **需求分析** - AI 驱动的需求理解和功能建议
 - **错误诊断** - AST 分析和自动修复建议
 - **内容处理** - HTML 转 Markdown，智能文件命名
-- **多模型支持** - OpenAI 兼容 API，模型切换
+- **多模型支持** - Pi Runtime 从 Provider 模型目录获取模型并支持切换
 
 ### 🛡️ 安全与性能
 - **多层安全** - Token 认证、路径检查、权限控制、文件锁定
@@ -40,7 +40,7 @@
 - **数据库**: SQLite3 + aiosqlite (文件元数据管理)
 - **实时通信**: WebSocket + Y.js (协作编辑和文件系统事件)
 - **编译服务**: Node.js + esbuild (TSX/JSX实时编译)
-- **AI集成**: OpenAI兼容API (流式响应支持)
+- **AI集成**: Pi Coding Agent + pi-ai Provider (流式响应支持)
 - **文件处理**: aiofiles (异步文件I/O)
 - **HTTP客户端**: aiohttp (URL下载和API调用)
 
@@ -72,8 +72,8 @@
 
 ### 环境要求
 - **Python**: 3.8+ (后端服务)
-- **Node.js**: 18+ (编译服务)
-- **pnpm**: 8+ (前端包管理)
+- **Node.js**: 22+ (前端、编译服务和 Pi Runtime)
+- **npm**: 10+ (Node.js 包管理)
 - **Docker**: 可选 (容器化部署)
 
 ### 1. 克隆项目
@@ -84,21 +84,19 @@ cd oneShare
 
 ### 2. 配置环境变量
 ```bash
-# 复制环境配置模板（如果存在）
-cp server/env.example server/.env
-
-# 或创建新的环境配置文件
-touch server/.env
-
-# 编辑配置文件
-nano server/.env
+# 复制根目录环境配置模板并编辑
+cp .env.example .env
+nano .env
 ```
 
 必要配置项：
 ```env
 AUTH_TOKEN=your-secret-token         # 认证令牌
-LLM_API_KEY=your-openai-api-key     # AI功能API密钥
-LLM_BASE_URL=https://api.openai.com/v1  # AI API端点
+PI_PROVIDER_API_KEY=your-provider-api-key
+PI_PROVIDER_BASE_URL=https://api.openai.com/v1
+PI_DEFAULT_MODEL=gpt-5-nano
+PI_SESSION_TTL_MS=1800000
+PI_MAX_ACTIVE_SESSIONS=32
 ```
 
 ### 3. 安装依赖
@@ -106,26 +104,31 @@ LLM_BASE_URL=https://api.openai.com/v1  # AI API端点
 # 后端Python依赖
 cd server && pip install -r requirements.txt
 
-# 前端依赖和编译服务依赖
-cd ../client && pnpm install
-cd ../server/compile_service/node_compiler && npm install
+# 前端、Pi Runtime 和编译服务依赖
+npm --prefix client ci
+npm --prefix agent-runtime ci
+npm --prefix server/compile_service/node_compiler ci
 ```
 
 ### 4. 启动服务
 
 #### 开发模式
 ```bash
-# 启动后端 (包含编译服务)
-cd server && python main.py
+# 在一个终端启动文件后端
+python server/main.py
 
-# 新终端：启动前端开发服务器
-cd client && pnpm run dev
+# 在另一个终端启动 Pi Runtime
+set -a && source .env && set +a
+npm --prefix agent-runtime run dev
+
+# 在第三个终端启动前端
+npm --prefix client run dev
 ```
 
 #### 生产部署
 ```bash
 # 方式一：构建前端并通过后端提供服务
-cd client && pnpm run build
+npm --prefix client run build
 cd ../server && python main.py
 
 # 方式二：Docker 一键部署
@@ -174,10 +177,11 @@ UPLOAD_CHUNK_SIZE_MB=2                    # 上传分片大小
 DOWNLOAD_CHUNK_SIZE_MB=8                  # 下载分片大小
 
 # AI 服务配置
-LLM_API_KEY=your-openai-api-key
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini                     # 默认AI模型
-LLM_MAX_TOKENS=28000                      # 最大令牌数
+PI_PROVIDER_API_KEY=your-provider-api-key
+PI_PROVIDER_BASE_URL=https://api.openai.com/v1
+PI_DEFAULT_MODEL=gpt-5-nano
+PI_SESSION_TTL_MS=1800000
+PI_MAX_ACTIVE_SESSIONS=32
 
 # 编译服务配置
 COMPILE_CACHE_SIZE=100                    # 编译缓存大小(MB)
@@ -242,10 +246,11 @@ env_file:
 - `DELETE /api/compile/cache` - 清理编译缓存
 
 #### AI 代码生成
-- `POST /api/llm/generate` - 代码生成
-- `POST /api/llm/analyze` - 需求分析
-- `POST /api/llm/fix` - 错误修复建议
-- `POST /api/llm/stream` - 流式代码生成
+- `GET /api/ai/models` - 获取 Provider 模型目录
+- `POST /api/ai/conversations` - 创建 Pi 会话
+- `POST /api/ai/conversations/{conversationId}/runs` - 流式执行初始或后续会话 run
+- `DELETE /api/ai/conversations/{conversationId}/runs/{runId}` - 停止当前 run
+- `DELETE /api/ai/conversations/{conversationId}` - 释放会话
 
 ### 协作与分享
 
@@ -281,6 +286,7 @@ curl -X PUT \
 
 # 表单上传 (支持元数据)
 curl -X POST \
+  -N \
   -H "Authorization: Bearer your-secret-token" \
   -F "action=upload" \
   -F "file=@/path/to/file.txt" \
@@ -302,12 +308,18 @@ curl -H "Authorization: Bearer your-secret-token" \
 
 #### AI 代码生成
 ```bash
-# 生成React组件
+# 创建会话（返回 conversationId）
 curl -X POST \
   -H "Authorization: Bearer your-secret-token" \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "创建一个计算器组件", "type": "tsx"}' \
-  http://localhost:8000/api/llm/generate
+  -d '{"model":"gpt-5-nano","messages":[{"role":"user","content":"创建一个计算器组件"}]}' \
+  http://localhost:8000/api/ai/conversations
+
+# 用返回的 conversationId 执行首轮流式生成
+curl -N -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"runId":"demo-run-1","kind":"initial"}' \
+  http://localhost:8000/api/ai/conversations/{conversationId}/runs
 ```
 
 #### 编译TSX代码
@@ -325,7 +337,6 @@ oneShare/
 ├── server/                      # FastAPI 后端服务
 │   ├── main.py                 # 应用入口 + 端口管理
 │   ├── routes.py               # 文件管理路由
-│   ├── llm_routes.py           # AI服务路由
 │   ├── file_handlers.py        # 文件操作核心逻辑
 │   ├── websocket.py            # WebSocket文件系统事件
 │   ├── yjs_websocket.py        # Y.js协作编辑WebSocket
@@ -346,6 +357,10 @@ oneShare/
 │   ├── storage/               # 统一文件存储
 │   │   └── metadata.db        # SQLite元数据数据库
 │   └── requirements.txt       # Python依赖
+├── agent-runtime/              # Pi Coding Agent AI Runtime
+│   ├── src/routes.ts           # 模型目录与 SSE 生成接口
+│   ├── src/pi-provider.ts      # pi-ai Provider 注册
+│   └── src/model-catalog.ts    # /v1/models 目录缓存
 ├── client/                     # React前端应用
 │   ├── src/
 │   │   ├── pages/             # 页面组件
@@ -382,7 +397,7 @@ oneShare/
 ├── docker-compose.yml         # Docker编排配置
 ├── nginx.conf                # Nginx反向代理配置
 ├── supervisord.conf          # 进程管理配置
-├── server/env.example        # 环境变量模板
+├── .env.example              # 环境变量模板
 └── README.md                 # 项目文档
 ```
 
@@ -436,23 +451,27 @@ python main.py
 
 # 2. 前端开发
 cd client
-pnpm install
-pnpm run dev
+npm ci
+npm run dev
 
-# 3. 编译服务开发
-cd server/compile_service/node_compiler
-npm install
-# 编译服务会自动启动
+# 3. Pi Runtime 开发
+cd ../agent-runtime
+npm ci
+set -a && source ../.env && set +a
+npm run dev
+
+# 4. 编译服务依赖
+npm --prefix ../server/compile_service/node_compiler ci
 ```
 
 ### 开发工具配置
 ```bash
 # 代码格式化
-cd client && pnpm run lint
+cd client && npm run lint
 cd server && black . && isort .
 
 # 类型检查
-cd client && pnpm run type-check
+cd client && npx tsc --noEmit
 cd server && mypy .
 
 # 测试运行
@@ -541,7 +560,7 @@ server {
 ```bash
 # 生产环境配置 (server/.env)
 AUTH_TOKEN=strong-production-token
-LLM_API_KEY=production-api-key
+PI_PROVIDER_API_KEY=production-api-key
 SQLITE_DB_PATH=./server/storage/metadata.db
 FILE_STORAGE_PATH=./server/storage
 
@@ -605,7 +624,7 @@ sqlite3 /app/storage/metadata.db ".dbinfo"
 ### 常见问题
 
 **Q: 如何增加新的AI模型支持？**
-A: 在 `llm_service.py` 中添加模型配置，更新环境变量即可。
+A: 上游 Provider 的 `/v1/models` 会被运行时自动刷新；将目标模型设为 `PI_DEFAULT_MODEL` 前，先确认它出现在该目录中。
 
 **Q: 如何自定义编译插件？**
 A: 在 `compile_service/node_compiler/plugins/` 目录添加新插件。

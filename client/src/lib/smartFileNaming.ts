@@ -1,4 +1,4 @@
-import { callOpenAI } from './llmWrapper';
+import { generateText } from './aiClient';
 import type { FileItem, Message } from '@/types';
 
 interface NameSuggestion {
@@ -55,7 +55,7 @@ ${analysisContent}
         content: prompt
       }
     ];
-    const analysisPromise = callOpenAI(messages);
+    const analysisPromise = generateText(messages);
     
     const response = await Promise.race([analysisPromise, timeoutPromise]);
     

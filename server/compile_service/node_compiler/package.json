@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node compile.js",
-    "test": "node test.js",
+    "test": "printf '{\"code\":\"const App = () => <div>Hello</div>;\",\"libraries\":[]}' | node compile.js",
     "install-deps": "npm install"
   },
   "dependencies": {

@@ -37,7 +37,7 @@ Task 1.3 的实现 - 基于 esbuild 原生版本的 Node.js TSX 编译器，为�
 node_compiler/
 ├── package.json          # Node.js 依赖配置
 ├── compile.js            # 主编译脚本
-├── test.js              # 测试脚本
+├── batch_test.js         # 批量集成测试脚本
 ├── README.md            # 项目文档
 ├── plugins/             # esbuild 插件目录
 └── utils/               # 工具函数目录
@@ -107,8 +107,8 @@ result = await service.compile(request)
 ### 运行测试
 
 ```bash
-# 运行内置测试套件
-node test.js
+# 运行本地编译冒烟测试
+npm test
 
 # 运行集成测试
 python ../run_tests.py

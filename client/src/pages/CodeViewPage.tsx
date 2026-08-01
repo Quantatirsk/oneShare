@@ -7,7 +7,7 @@ import { getSharedFileContent, type ShareInfo } from '@/lib/shareUtils';
 import { FileServerAPI } from '@/lib/api';
 import { useAppStore } from '@/stores/appStore';
 import { ModernMarkdownViewer } from '@/components/ModernMarkdownViewer';
-import { callOpenAIStream } from '@/lib/llmWrapper';
+import { streamText } from '@/lib/aiClient';
 import Editor from '@monaco-editor/react';
 import { loader } from '@monaco-editor/react';
 
@@ -109,7 +109,7 @@ export function CodeViewPage() {
       
       const messages = [{ role: 'user' as const, content: prompt }];
       
-      await callOpenAIStream(
+      await streamText(
         messages,
         (chunk) => {
           setSummaryContent(prev => prev + chunk);

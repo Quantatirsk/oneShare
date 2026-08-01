@@ -1,0 +1,27 @@
+{
+  "name": "oneshare-pi-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "fastify": "5.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsup": "8.5.0",
+    "tsx": "4.21.0",
+    "typescript": "6.0.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

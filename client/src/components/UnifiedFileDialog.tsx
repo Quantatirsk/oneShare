@@ -47,7 +47,7 @@ import { isModifierPressed, isMobile, isTouchDevice } from '@/lib/platform';
 import { useAppStore } from '@/stores/appStore';
 import { isCodeFile, isMarkdownFile, isTextFile } from '@/constants/fileExtensions';
 import { cn } from '@/lib/utils';
-import { callOpenAI, callOpenAIStream } from '@/lib/llmWrapper';
+import { generateText, streamText } from '@/lib/aiClient';
 import { getOrCreateShare, createShareUrl } from '@/lib/shareUtils';
 import type { AppConfig } from '@/types';
 
@@ -161,7 +161,7 @@ export function UnifiedFileDialog({
       const prompt = `${content}\n\n请分析以上内容并为其生成一个简洁、描述性的文件名（包含扩展名，总长度不超过30个字符），后缀名可以是md/txt/py/js/java/tsx等代码后缀，不允许使用pdf/docx/xlsx等作为后缀。直接返回文件名：`;
       const messages = [{ role: 'user' as const, content: prompt }];
       
-      const result = await callOpenAI(messages);
+      const result = await generateText(messages);
       
       if (result) {
         // 清理文件名，移除多余的引号和不安全字符
@@ -230,7 +230,7 @@ export function UnifiedFileDialog({
       const prompt = `${originalContent}\n\n请帮我对以上文本内容进行排版，使其更加清晰易读。如果是代码，请保持代码格式，并确保代码块正确缩进。如果是文本，请使用适当的段落和列表格式。直接返回结果：`;
       const messages = [{ role: 'user' as const, content: prompt }];
       
-      await callOpenAIStream(
+      await streamText(
         messages,
         (chunk) => {
           setEditorContent(prev => prev + chunk);
@@ -276,7 +276,7 @@ export function UnifiedFileDialog({
       const prompt = `请仔细分析以下内容，提供深入的解读和分析，包括但不限于：主要观点、核心概念、逻辑结构、优缺点、可能的改进建议等。请使用Markdown格式，包含适当的emoji图标来增强可读性：\n\n${content}`;
       const messages = [{ role: 'user' as const, content: prompt }];
       
-      await callOpenAIStream(
+      await streamText(
         messages,
         (chunk) => {
           setAnalysisContent(prev => prev + chunk);

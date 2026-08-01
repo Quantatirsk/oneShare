@@ -10,11 +10,29 @@ import { AppPreviewRouter } from './pages/AppPreviewRouter.tsx'
 import { TsxDebugPage } from './pages/TsxDebugPage.tsx'
 import { NotFoundPage } from './pages/NotFoundPage.tsx'
 import { Toaster } from '@/components/ui/toaster'
-import { preloadConfig } from '@/lib/llmConfig'
+import { fetchAiModelCatalog } from '@/lib/aiClient'
 import './globals.css'
 
-// 预加载 LLM 配置
-preloadConfig().catch(console.error);
+async function configureServiceWorker(): Promise<void> {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+
+  if (import.meta.env.PROD) {
+    await navigator.serviceWorker.register('/sw.js');
+    return;
+  }
+
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.map((registration) => registration.unregister()));
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames
+    .filter((cacheName) => cacheName.startsWith('oneshare-'))
+    .map((cacheName) => caches.delete(cacheName)));
+}
+
+configureServiceWorker().catch(console.error);
+fetchAiModelCatalog().catch(console.error);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

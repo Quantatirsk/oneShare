@@ -10,6 +10,13 @@ interface UseCodeRendererProps {
   previewContainerRef: React.RefObject<HTMLDivElement>;
 }
 
+export type RenderFailure = {
+  kind: 'source' | 'dependency' | 'runtime' | 'infrastructure';
+  message: string;
+};
+
+export type RenderOutcome = { ok: true } | { ok: false; failure: RenderFailure };
+
 export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
   const { code, setLastRendered, setHasPreviewContent, setIsRendering } = useCodeState();
   const { conversation } = useConversationState();
@@ -25,11 +32,11 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
     codeToRender: string, 
     codeLang: 'tsx' | 'html' = 'tsx', 
     forceRender = false
-  ) => {
+  ): Promise<RenderOutcome> => {
     console.log('🎨 [渲染] 参数:', { codeLang, codeLength: codeToRender.length, forceRender });
     
     if (!previewContainerRef.current || !codeToRender.trim()) {
-      return;
+      return { ok: false, failure: { kind: 'infrastructure', message: '预览容器尚未准备好。' } };
     }
 
     // 生成渲染请求ID，防止竞态条件
@@ -38,7 +45,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
 
     // 只有代码真正变化时才重新渲染
     if (!forceRender && codeToRender === code.lastRendered) {
-      return;
+      return { ok: true };
     }
 
     try {
@@ -51,7 +58,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
       // 检查是否为最新的渲染请求
       if (lastRenderRequestRef.current !== renderRequestId) {
         setIsRendering(false);
-        return; // 已被新的渲染请求取代
+        return { ok: false, failure: { kind: 'infrastructure', message: '预览请求已被新的请求取代。' } };
       }
 
       // 添加小延迟确保状态同步，避免渲染时机问题
@@ -60,7 +67,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
       // 再次检查是否为最新的渲染请求
       if (lastRenderRequestRef.current !== renderRequestId) {
         setIsRendering(false);
-        return;
+        return { ok: false, failure: { kind: 'infrastructure', message: '预览请求已被新的请求取代。' } };
       }
 
       if (codeLang === 'html') {
@@ -86,13 +93,14 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
         setHasPreviewContent(true);
         setIsRendering(false);
       }
+      return { ok: true };
     } catch (error) {
       console.error(`${codeLang.toUpperCase()}渲染失败:`, error);
       
       // 检查是否为最新的渲染请求
       if (lastRenderRequestRef.current !== renderRequestId) {
         setIsRendering(false);
-        return;
+        return { ok: false, failure: { kind: 'infrastructure', message: '预览请求已被新的请求取代。' } };
       }
       
       if (previewContainerRef.current) {
@@ -149,6 +157,13 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
         setHasPreviewContent(false); // 错误时不显示预览内容
         setIsRendering(false);
       }
+      return {
+        ok: false,
+        failure: {
+          kind: 'source',
+          message: error instanceof Error ? error.message : '未知渲染错误',
+        },
+      };
     }
   }, [code.lastRendered, setLastRendered, setHasPreviewContent, setIsRendering, previewContainerRef]);
 
@@ -160,7 +175,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
   
   // 立即渲染函数（用于模板选择）
   const immediateRenderPreview = useCallback((codeToRender: string, codeLang: 'tsx' | 'html' = 'tsx') => {
-    renderPreview(codeToRender, codeLang, true);
+    void renderPreview(codeToRender, codeLang, true);
   }, [renderPreview]);
 
   // 确定是否需要渲染预览 - 统一的逻辑，避免重复判断
@@ -169,7 +184,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
            code.current.trim() !== '' && 
            code.current !== code.lastRendered && 
            !code.isStreaming && 
-           conversation.stage !== 'generating';
+           !['generating', 'validating', 'repairing'].includes(conversation.stage);
   }, [code.current, code.lastRendered, code.isStreaming, conversation.stage]);
 
   // 唯一的自动渲染 effect - 合并之前的两个 useEffect
@@ -202,7 +217,7 @@ export function useCodeRenderer({ previewContainerRef }: UseCodeRendererProps) {
   // 手动刷新预览
   const refreshPreview = useCallback(() => {
     if (code.current) {
-      renderPreview(code.current, code.language, true);
+      void renderPreview(code.current, code.language, true);
     }
   }, [code.current, code.language, renderPreview]);
 
