@@ -144,7 +144,6 @@ async def get_cache_stats() -> Dict[str, Any]:
         total_entries = cache_manager.get_cache_size()
         memory_entries = len(getattr(cache_manager, '_memory_cache', {}))
         file_entries = total_entries - memory_entries
-        redis_entries = 0  # 如果使用Redis，这里需要实际计算
         
         # 计算命中率
         total_compiles = compile_service.stats.get("total_compiles", 0)
@@ -156,7 +155,6 @@ async def get_cache_stats() -> Dict[str, Any]:
             "total_entries": total_entries,
             "memory_cache_entries": memory_entries,
             "file_cache_entries": file_entries,
-            "redis_cache_entries": redis_entries,
             "cache_size_mb": total_entries * 0.001,  # 估算
             "hit_rate": round(hit_rate, 3),
             "miss_rate": round(miss_rate, 3)
@@ -226,7 +224,6 @@ async def cache_health() -> Dict[str, Any]:
             "cache_entries": cache_manager.get_cache_size(),
             "memory_cache_available": hasattr(cache_manager, '_memory_cache'),
             "file_cache_available": hasattr(cache_manager, '_cache_dir'),
-            "redis_cache_available": False,  # 需要实际检查Redis连接
             "last_check": "2025-07-05T09:38:00Z"
         }
         

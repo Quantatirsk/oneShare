@@ -218,7 +218,6 @@ class CompileServiceLogger:
         module_configs = {
             "tsx_compiler": logging.INFO,
             "cache_manager": logging.INFO,
-            "redis_cache": logging.INFO,
             "error_handler": logging.INFO,
             "compile_routes": logging.INFO,
             "node_compiler": logging.DEBUG

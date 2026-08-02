@@ -1,7 +1,7 @@
 """
 缓存管理器模块
 
-实现三级缓存架构：内存缓存、文件缓存、Redis缓存
+实现两级缓存架构：内存缓存、文件缓存
 """
 
 import asyncio
@@ -17,12 +17,11 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 class CacheManager:
-    """三级缓存管理器"""
+    """两级缓存管理器"""
     
     def __init__(self, 
                  memory_cache_size: int = 1000,
                  file_cache_dir: str = "cache",
-                 redis_url: Optional[str] = None,
                  default_ttl: int = 3600):
         """
         初始化缓存管理器
@@ -30,7 +29,6 @@ class CacheManager:
         Args:
             memory_cache_size: 内存缓存最大条目数
             file_cache_dir: 文件缓存目录
-            redis_url: Redis连接URL，如果为None则不启用Redis缓存
             default_ttl: 默认过期时间(秒)
         """
         self.memory_cache_size = memory_cache_size
@@ -44,23 +42,10 @@ class CacheManager:
         self.file_cache_dir = Path(file_cache_dir)
         self.file_cache_dir.mkdir(exist_ok=True)
         
-        # Redis缓存 (可选)
-        self.redis_cache = None
-        if redis_url:
-            try:
-                from .redis_cache import RedisCache
-                self.redis_cache = RedisCache(redis_url=redis_url, default_ttl=default_ttl)
-                logger.info(f"Redis cache enabled with URL: {redis_url}")
-            except ImportError:
-                logger.warning("Redis not available, install with: uv add --project server redis")
-            except Exception as e:
-                logger.error(f"Failed to initialize Redis cache: {str(e)}")
-        
         # 缓存统计
         self.stats = {
             "memory_hits": 0,
             "file_hits": 0,
-            "redis_hits": 0,
             "misses": 0,
             "total_requests": 0,
             "evictions": 0
@@ -95,17 +80,6 @@ class CacheManager:
             # 提升到内存缓存
             self._set_to_memory(key, file_data)
             return file_data
-        
-        # 3. 检查Redis缓存
-        if self.redis_cache:
-            redis_data = await self._get_from_redis(key)
-            if redis_data:
-                self.stats["redis_hits"] += 1
-                logger.debug(f"Redis cache hit for key: {key}")
-                # 提升到内存和文件缓存
-                self._set_to_memory(key, redis_data)
-                await self._set_to_file(key, redis_data)
-                return redis_data
         
         # 缓存未命中
         self.stats["misses"] += 1
@@ -146,12 +120,6 @@ class CacheManager:
             if not file_success:
                 success = False
             
-            # Redis缓存
-            if self.redis_cache:
-                redis_success = await self._set_to_redis(key, cached_data, ttl)
-                if not redis_success:
-                    success = False
-            
             logger.debug(f"Cache set for key: {key}, success: {success}")
             return success
             
@@ -178,10 +146,6 @@ class CacheManager:
             file_path = self._get_file_path(key)
             if file_path.exists():
                 file_path.unlink()
-            
-            # 从Redis缓存删除
-            if self.redis_cache:
-                await self.redis_cache.delete(key)
             
             logger.debug(f"Cache deleted for key: {key}")
             return True
@@ -212,11 +176,6 @@ class CacheManager:
                 file_path.unlink()
                 file_count += 1
             cleared_count += file_count
-            
-            # 清空Redis缓存 (只清空我们的键)
-            if self.redis_cache:
-                redis_count = await self.redis_cache.clear_pattern("*")
-                cleared_count += redis_count
             
             logger.info(f"Cleared {cleared_count} cache entries")
             return cleared_count
@@ -330,33 +289,6 @@ class CacheManager:
         key_hash = hashlib.md5(key.encode()).hexdigest()
         return self.file_cache_dir / f"{key_hash}.cache"
     
-    async def _get_from_redis(self, key: str) -> Optional[Dict[str, Any]]:
-        """从Redis缓存获取数据"""
-        try:
-            if not self.redis_cache:
-                return None
-            
-            # 使用RedisCache获取数据，它已经处理了过期检查
-            return await self.redis_cache.get(key)
-            
-        except Exception as e:
-            logger.error(f"Failed to get from Redis cache: {str(e)}")
-            return None
-    
-    async def _set_to_redis(self, key: str, data: Dict[str, Any], ttl: int) -> bool:
-        """设置到Redis缓存"""
-        try:
-            if not self.redis_cache:
-                return False
-            
-            # 使用RedisCache设置数据，传入原始value而不是包装后的data
-            value = data.get("value", data)
-            return await self.redis_cache.set(key, value, ttl)
-            
-        except Exception as e:
-            logger.error(f"Failed to set to Redis cache: {str(e)}")
-            return False
-    
     def get_cache_size(self) -> int:
         """获取缓存条目总数"""
         memory_size = len(self.memory_cache)
@@ -365,37 +297,23 @@ class CacheManager:
     
     async def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
-        total_hits = self.stats["memory_hits"] + self.stats["file_hits"] + self.stats["redis_hits"]
+        total_hits = self.stats["memory_hits"] + self.stats["file_hits"]
         total_requests = self.stats["total_requests"]
         
         hit_rate = total_hits / total_requests if total_requests > 0 else 0.0
         miss_rate = self.stats["misses"] / total_requests if total_requests > 0 else 0.0
         
-        # 获取Redis统计信息
-        redis_cache_entries = 0
-        redis_stats = {}
-        if self.redis_cache:
-            try:
-                redis_cache_entries = await self.redis_cache.get_size()
-                redis_stats = self.redis_cache.get_stats()
-            except Exception as e:
-                logger.error(f"Failed to get Redis stats: {str(e)}")
-        
         return {
-            "total_entries": self.get_cache_size() + redis_cache_entries,
+            "total_entries": self.get_cache_size(),
             "memory_cache_entries": len(self.memory_cache),
             "file_cache_entries": len(list(self.file_cache_dir.glob("*.cache"))),
-            "redis_cache_entries": redis_cache_entries,
             "cache_size_mb": self._calculate_cache_size_mb(),
             "hit_rate": round(hit_rate, 3),
             "miss_rate": round(miss_rate, 3),
             "memory_hits": self.stats["memory_hits"],
             "file_hits": self.stats["file_hits"],
-            "redis_hits": self.stats["redis_hits"],
             "total_requests": self.stats["total_requests"],
             "evictions": self.stats["evictions"],
-            "redis_enabled": self.redis_cache is not None,
-            "redis_stats": redis_stats
         }
     
     def _calculate_cache_size_mb(self) -> float:

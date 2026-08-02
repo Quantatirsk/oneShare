@@ -520,17 +520,17 @@ async def handle_unified_update(file_path: str, content: str, token: Optional[st
         
         # 检查权限和锁定状态
         metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        file_metadata = await metadata_manager.load_metadata(file_path)
+        access = await metadata_manager.check_file_access(file_path, is_authenticated=bool(token))
+        file_metadata = access["metadata"]
         
-        if file_metadata and not file_metadata.is_public and not token:
+        if access["reason"] == "private":
             return FileResponse(
                 success=False,
                 error="需要认证才能编辑私有文件",
                 code="AUTHENTICATION_REQUIRED"
             )
         
-        # 检查文件是否被锁定
-        if file_metadata and file_metadata.locked:
+        if access["reason"] == "locked":
             return FileResponse(
                 success=False,
                 error="文件已被锁定，无法编辑",
@@ -1420,15 +1420,14 @@ async def handle_unified_delete(filename: str, user_token: str = None) -> FileRe
         # 检查权限和锁定状态
         metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
         if os.path.isfile(path):
-            metadata = await metadata_manager.load_metadata(filename)
-            if metadata and not metadata.is_public and not user_token:
+            access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token))
+            if access["reason"] == "private":
                 return FileResponse(
                     success=False,
                     error="没有权限删除此文件",
                     code="PERMISSION_DENIED"
                 )
-            # 检查文件是否被锁定
-            if metadata and metadata.locked:
+            if access["reason"] == "locked":
                 return FileResponse(
                     success=False,
                     error="文件已被锁定，无法删除",
@@ -1503,9 +1502,9 @@ async def handle_change_file_permission(filename: str, is_public: bool,
         
         # 检查当前权限（只有有权限的用户才能修改权限）
         metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        metadata = await metadata_manager.load_metadata(filename)
+        access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token), check_lock=False)
         
-        if metadata and not metadata.is_public and not user_token:
+        if access["reason"] == "private":
             return FileResponse(
                 success=False,
                 error="没有权限修改此文件",
@@ -1579,8 +1578,8 @@ async def handle_batch_change_permission(filenames: List[str], is_public: bool,
                     continue
                 
                 # 检查权限
-                metadata = await metadata_manager.load_metadata(filename)
-                if metadata and not metadata.is_public and not user_token:
+                access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token), check_lock=False)
+                if access["reason"] == "private":
                     failed_files.append({
                         "filename": filename,
                         "error": "没有权限修改此文件"
@@ -1686,15 +1685,14 @@ async def handle_unified_rename(old_path: str, new_path: str, user_token: str = 
         metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
         
         if os.path.isfile(old_full_path):
-            metadata = await metadata_manager.load_metadata(old_path)
-            if metadata and not metadata.is_public and not user_token:
+            access = await metadata_manager.check_file_access(old_path, is_authenticated=bool(user_token))
+            if access["reason"] == "private":
                 return FileResponse(
                     success=False,
                     error="没有权限重命名此文件",
                     code="PERMISSION_DENIED"
                 )
-            # 检查文件是否被锁定
-            if metadata and metadata.locked:
+            if access["reason"] == "locked":
                 return FileResponse(
                     success=False,
                     error="文件已被锁定，无法重命名",
@@ -1829,15 +1827,14 @@ async def handle_unified_move(source_files: list, target_dir: str, user_token: s
                 
                 # 检查权限和锁定状态
                 if os.path.isfile(source_full_path):
-                    metadata = await metadata_manager.load_metadata(source_file)
-                    if metadata and not metadata.is_public and not user_token:
+                    access = await metadata_manager.check_file_access(source_file, is_authenticated=bool(user_token))
+                    if access["reason"] == "private":
                         failed_files.append({
                             "filename": source_file,
                             "error": "没有权限移动此文件"
                         })
                         continue
-                    # 检查文件是否被锁定
-                    if metadata and metadata.locked:
+                    if access["reason"] == "locked":
                         failed_files.append({
                             "filename": source_file,
                             "error": "文件已被锁定，无法移动"
@@ -1959,8 +1956,8 @@ async def handle_unified_batch_delete(filenames: list, user_token: str = None) -
                     continue
                 
                 # 检查权限
-                metadata = await metadata_manager.load_metadata(filename)
-                if metadata and not metadata.is_public and not user_token:
+                access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token), check_lock=False)
+                if access["reason"] == "private":
                     failed_files.append({
                         "filename": filename,
                         "error": "没有权限删除此文件"
@@ -2204,13 +2201,6 @@ async def handle_set_file_lock(file_path: str, locked: bool, user_token: str) ->
         
         # 使用元数据管理器设置锁定状态
         metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        
-        # 检查是否已经被锁定（如果要进行其他操作的话）
-        if not locked:  # 解锁操作，需要检查当前是否锁定
-            current_metadata = await metadata_manager.load_metadata(file_path)
-            if current_metadata and current_metadata.locked:
-                # 可以解锁
-                pass
         
         # 设置锁定状态
         success = await metadata_manager.set_file_lock(file_path, locked)

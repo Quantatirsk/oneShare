@@ -266,6 +266,31 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
                 original_url=row[9],
                 locked=bool(row[10])
             )
+
+    async def check_file_access(self, file_path: str, is_authenticated: bool = False,
+                                check_lock: bool = True) -> Dict[str, Any]:
+        """判定一个文件当前是否可访问。
+
+        把「加载元数据 + 私有权限 + 锁定状态」收敛到一个接口,
+        调用方只需根据 reason 决定自己的错误措辞, 无需了解 is_public / locked 内部细节。
+        check_lock=False 时只判私有权限, 不判锁定（用于仅改权限等不受锁影响的操作）。
+
+        Returns:
+            {"allowed": bool, "reason": str | None, "metadata": FileMetadata | None}
+            reason 为 "private" 表示私有且未认证; "locked" 表示文件被锁定。
+            metadata 为已加载的元数据对象（供后续保存复用, 避免重复查询）;
+            文件不存在时 allowed=True 且 metadata=None。
+        """
+        metadata = await self.load_metadata(file_path)
+        if metadata is None:
+            return {"allowed": True, "reason": None, "metadata": None}
+
+        if not metadata.is_public and not is_authenticated:
+            return {"allowed": False, "reason": "private", "metadata": metadata}
+        if check_lock and metadata.locked:
+            return {"allowed": False, "reason": "locked", "metadata": metadata}
+
+        return {"allowed": True, "reason": None, "metadata": metadata}
     
     async def create_metadata(self, file_path: str, file_size: int, 
                             is_public: bool = False, content_type: str = None,
