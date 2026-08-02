@@ -1576,5 +1576,23 @@
     "filename": "财务报告RLYV.html",
     "is_public": true,
     "created_at": "2025-07-31T00:04:41.978019"
+  },
+  "85c25a1c-7db8-4f57-bec2-34e4b72e514a": {
+    "share_id": "85c25a1c-7db8-4f57-bec2-34e4b72e514a",
+    "filename": "汽车配置器DSVK.tsx",
+    "is_public": true,
+    "created_at": "2026-08-02T10:31:07.423495"
+  },
+  "9034125b-7dbb-45c7-a660-fffe54601335": {
+    "share_id": "9034125b-7dbb-45c7-a660-fffe54601335",
+    "filename": "数字音频工作站CAKG.tsx",
+    "is_public": true,
+    "created_at": "2026-08-02T10:48:26.482790"
+  },
+  "9e7762c4-d126-4a7e-8d90-d6ad61d3e185": {
+    "share_id": "9e7762c4-d126-4a7e-8d90-d6ad61d3e185",
+    "filename": "智能客服汇报MCPU.tsx",
+    "is_public": true,
+    "created_at": "2026-08-02T10:57:14.509645"
   }
 }

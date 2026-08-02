@@ -52,7 +52,7 @@ class CacheManager:
                 self.redis_cache = RedisCache(redis_url=redis_url, default_ttl=default_ttl)
                 logger.info(f"Redis cache enabled with URL: {redis_url}")
             except ImportError:
-                logger.warning("Redis not available, install with: pip install redis")
+                logger.warning("Redis not available, install with: uv add --project server redis")
             except Exception as e:
                 logger.error(f"Failed to initialize Redis cache: {str(e)}")
         

@@ -23,14 +23,16 @@ COPY agent-runtime/ .
 RUN npm run build
 
 # 构建阶段 - 后端依赖
+FROM ghcr.io/astral-sh/uv:0.9.22 AS uv
 FROM python:3.11-slim AS backend-deps
 WORKDIR /app
+COPY --from=uv /uv /uvx /bin/
 # 安装构建工具
 RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
-COPY server/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY server/pyproject.toml server/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 # 构建阶段 - 后端代码
 FROM backend-deps AS backend-builder
@@ -53,8 +55,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nginx/sites-enabled/default
 
-# 复制 Python 依赖
-COPY --from=backend-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+# 复制 Python 虚拟环境
+COPY --from=backend-deps /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:${PATH}"
 
 # 复制后端代码
 COPY --from=backend-builder /app /app

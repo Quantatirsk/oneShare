@@ -6,14 +6,11 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ### Running the Server
 ```bash
-# Run the server directly with Python
-python main.py
+# Start the complete development stack
+python dev.py
 
-# Or use uvicorn for development
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# Using the dedicated server script
-python server.py
+# Or run the backend only
+cd server && uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Running the React Client
@@ -33,8 +30,8 @@ npm run preview
 
 ### Dependencies
 ```bash
-# Install Python dependencies
-cd server && pip install -r requirements.txt
+# Sync Python dependencies
+uv sync --project server
 
 # Install React dependencies
 cd client && npm install

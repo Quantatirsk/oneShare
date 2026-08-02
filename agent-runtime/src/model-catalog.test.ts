@@ -58,3 +58,32 @@ test('a failed refresh retains the last successful catalog as stale', async () =
   assert.equal(catalog.getSnapshot().stale, true);
   assert.deepEqual(catalog.getSnapshot().models, [{ id: 'model-b', name: 'model-b' }]);
 });
+
+test('an initial catalog failure does not prevent a later refresh from recovering', async () => {
+  let call = 0;
+  const catalog = new ModelCatalog(config, {
+    fetch: async () => {
+      call += 1;
+      if (call === 1) throw new Error('This operation was aborted');
+      return new Response(JSON.stringify({ data: [{ id: 'model-b' }] }));
+    },
+  });
+
+  await catalog.start();
+  assert.throws(() => catalog.getSnapshot(), ModelCatalogUnavailableError);
+
+  await catalog.refresh();
+  assert.deepEqual(catalog.getSnapshot().models, [{ id: 'model-b', name: 'model-b' }]);
+});
+
+test('an invalid default model remains a startup error', async () => {
+  const catalog = new ModelCatalog(config, {
+    fetch: async () => new Response(JSON.stringify({ data: [{ id: 'model-a' }] })),
+  });
+
+  await assert.rejects(catalog.start(), (error: unknown) => {
+    assert.ok(error instanceof ModelCatalogUnavailableError);
+    assert.equal(error.retryable, false);
+    return true;
+  });
+});

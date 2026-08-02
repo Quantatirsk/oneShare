@@ -14,7 +14,10 @@ export interface ModelCatalogSnapshot {
 }
 
 export class ModelCatalogUnavailableError extends Error {
-  public constructor(message = 'The upstream model catalog is unavailable.') {
+  public constructor(
+    message = 'The upstream model catalog is unavailable.',
+    public readonly retryable = true,
+  ) {
     super(message);
   }
 }
@@ -43,7 +46,13 @@ export class ModelCatalog {
   }
 
   public async start(): Promise<void> {
-    await this.refresh();
+    try {
+      await this.refresh();
+    } catch (error) {
+      if (!(error instanceof ModelCatalogUnavailableError) || !error.retryable) {
+        throw error;
+      }
+    }
   }
 
   public getSnapshot(): ModelCatalogSnapshot {
@@ -81,15 +90,18 @@ export class ModelCatalog {
         signal: abortController.signal,
       });
       if (!response.ok) {
-        throw new ModelCatalogUnavailableError(`Model catalog request failed with HTTP ${response.status}.`);
+        throw new ModelCatalogUnavailableError(
+          `Model catalog request failed with HTTP ${response.status}.`,
+          response.status === 408 || response.status === 429 || response.status >= 500,
+        );
       }
       const payload = await response.json() as OpenAIModelsResponse;
       const models = normalizeModels(payload);
       if (models.length === 0) {
-        throw new ModelCatalogUnavailableError('The upstream model catalog is empty.');
+        throw new ModelCatalogUnavailableError('The upstream model catalog is empty.', false);
       }
       if (!models.some((model) => model.id === this.config.defaultModel)) {
-        throw new ModelCatalogUnavailableError('PI_DEFAULT_MODEL is absent from the upstream model catalog.');
+        throw new ModelCatalogUnavailableError('PI_DEFAULT_MODEL is absent from the upstream model catalog.', false);
       }
       const snapshot: ModelCatalogSnapshot = {
         models,

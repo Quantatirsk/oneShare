@@ -67,7 +67,7 @@ function parseRun(body: RunBody): { runId: string; kind: 'initial' | 'user'; con
 function mapFailure(error: unknown): ApiRouteError {
   if (error instanceof ApiRouteError) return error;
   if (error instanceof ModelNotAvailableError) return new ApiRouteError(400, { code: 'MODEL_NOT_AVAILABLE', message: error.message, retryable: false });
-  if (error instanceof ModelCatalogUnavailableError) return new ApiRouteError(503, { code: 'MODEL_CATALOG_UNAVAILABLE', message: error.message, retryable: true });
+  if (error instanceof ModelCatalogUnavailableError) return new ApiRouteError(503, { code: 'MODEL_CATALOG_UNAVAILABLE', message: error.message, retryable: error.retryable });
   if (error instanceof ConversationNotFoundError) return new ApiRouteError(404, { code: 'CONVERSATION_NOT_FOUND', message: error.message, retryable: false });
   if (error instanceof ConversationBusyError) return new ApiRouteError(409, { code: 'CONVERSATION_BUSY', message: error.message, retryable: true });
   if (error instanceof InvalidConversationRunError) return new ApiRouteError(409, { code: 'INVALID_RUN', message: error.message, retryable: false });

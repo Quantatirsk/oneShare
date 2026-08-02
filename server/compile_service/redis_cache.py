@@ -63,7 +63,7 @@ class RedisCache:
             try:
                 import redis.asyncio as redis
             except ImportError:
-                logger.warning("Redis 库未安装，Redis 缓存功能不可用。安装命令: pip install redis")
+                logger.warning("Redis 库未安装，Redis 缓存功能不可用。安装命令: uv add --project server redis")
                 return False
             
             # 创建连接池

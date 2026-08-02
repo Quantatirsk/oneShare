@@ -11,19 +11,14 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def install_pytest():
-    """安装pytest依赖"""
+def has_pytest():
+    """确认 uv 管理的测试依赖可用。"""
     try:
         import pytest
         return True
     except ImportError:
-        print("正在安装pytest...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pytest-asyncio"])
-            return True
-        except subprocess.CalledProcessError:
-            print("❌ 无法安装pytest，请手动安装: pip install pytest pytest-asyncio")
-            return False
+        print("❌ pytest 未安装。请在项目根目录运行: uv sync --project server")
+        return False
 
 def run_simple_tests():
     """运行简单的功能测试（不依赖pytest）"""
@@ -298,7 +293,7 @@ def main():
         print("\n❌ 集成测试失败")
     
     # 3. 尝试运行pytest测试
-    if install_pytest():
+    if has_pytest():
         if run_pytest_tests():
             success_count += 1
             print("\n✅ Pytest 测试套件通过")

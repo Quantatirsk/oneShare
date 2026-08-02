@@ -101,8 +101,8 @@ PI_MAX_ACTIVE_SESSIONS=32
 
 ### 3. 安装依赖
 ```bash
-# 后端Python依赖
-cd server && pip install -r requirements.txt
+# 后端 Python 依赖
+uv sync --project server
 
 # 前端、Pi Runtime 和编译服务依赖
 npm --prefix client ci
@@ -114,15 +114,8 @@ npm --prefix server/compile_service/node_compiler ci
 
 #### 开发模式
 ```bash
-# 在一个终端启动文件后端
-python server/main.py
-
-# 在另一个终端启动 Pi Runtime
-set -a && source .env && set +a
-npm --prefix agent-runtime run dev
-
-# 在第三个终端启动前端
-npm --prefix client run dev
+# 一次启动文件后端、Pi Runtime 和前端
+python dev.py
 ```
 
 #### 生产部署
@@ -356,7 +349,8 @@ oneShare/
 │   │       └── plugins/       # 自定义esbuild插件
 │   ├── storage/               # 统一文件存储
 │   │   └── metadata.db        # SQLite元数据数据库
-│   └── requirements.txt       # Python依赖
+│   ├── pyproject.toml         # Python依赖声明
+│   └── uv.lock                # Python依赖锁定
 ├── agent-runtime/              # Pi Coding Agent AI Runtime
 │   ├── src/routes.ts           # 模型目录与 SSE 生成接口
 │   ├── src/pi-provider.ts      # pi-ai Provider 注册
@@ -443,11 +437,8 @@ oneShare/
 ### 本地开发环境搭建
 ```bash
 # 1. 后端开发
-cd server
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
+uv sync --project server
+cd server && uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 # 2. 前端开发
 cd client
