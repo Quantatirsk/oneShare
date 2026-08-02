@@ -70,5 +70,10 @@ cache/
 
 # YoYo AI version control directory
 .yoyo/
+
+# 运行时数据（不纳入版本控制）
+shares.json
 server/shares.json
-server/shares.json
+
+# 本地 Agent 运行时设置
+agent-runtime/.pi-runtime/settings.json
