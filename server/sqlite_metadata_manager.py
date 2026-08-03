@@ -293,7 +293,8 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
     async def create_metadata(self, file_path: str, file_size: int, 
                             is_public: bool = False, content_type: str = None,
                             created_by: str = None, tags: List[str] = None,
-                            description: str = "", notes: str = "", locked: bool = False) -> FileMetadata:
+                            description: str = "", notes: str = "", locked: bool = False,
+                            original_url: str = None) -> FileMetadata:
         """创建新的文件元数据"""
         filename = os.path.basename(file_path)
         now = datetime.now().isoformat()
@@ -314,7 +315,8 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
             tags=tags or [],
             description=description,
             notes=notes,
-            locked=locked
+            locked=locked,
+            original_url=original_url,
         )
         
         await self.save_metadata(file_path, metadata)
@@ -359,33 +361,91 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
     
     async def delete_metadata(self, file_path: str) -> bool:
         """删除文件元数据"""
+        return await self.delete_metadata_tree(file_path, include_descendants=False)
+
+    async def delete_metadata_tree(self, file_path: str, *, include_descendants: bool = True) -> bool:
+        """删除路径及其子树的文件、目录和标签元数据。"""
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("DELETE FROM file_metadata WHERE file_path = ?", (file_path,))
+                clause = "file_path = ?"
+                params = [file_path]
+                if include_descendants:
+                    clause += " OR file_path LIKE ?"
+                    params.append(f"{file_path.rstrip('/')}/%")
+
+                cursor = await db.execute(f"SELECT id FROM file_metadata WHERE {clause}", params)
+                file_ids = [row[0] for row in await cursor.fetchall()]
+                if file_ids:
+                    placeholders = ", ".join("?" for _ in file_ids)
+                    await db.execute(f"DELETE FROM file_tags WHERE file_id IN ({placeholders})", file_ids)
+                await db.execute(f"DELETE FROM file_metadata WHERE {clause}", params)
+
+                directory_clause = "directory_path = ?"
+                directory_params = [file_path]
+                if include_descendants:
+                    directory_clause += " OR directory_path LIKE ?"
+                    directory_params.append(f"{file_path.rstrip('/')}/%")
+                await db.execute(
+                    f"DELETE FROM directory_metadata WHERE {directory_clause}", directory_params
+                )
                 await db.commit()
                 return True
         except Exception as e:
             print(f"删除元数据失败 {file_path}: {e}")
             return False
-    
-    async def move_metadata(self, old_path: str, new_path: str) -> bool:
-        """移动/重命名元数据"""
-        try:
-            filename = os.path.basename(new_path)
-            now = datetime.now().isoformat()
-            
-            async with aiosqlite.connect(self.db_path) as db:
-                result = await db.execute("""
-                    UPDATE file_metadata SET 
-                        file_path = ?, filename = ?, updated_at = ?
-                    WHERE file_path = ?
-                """, (new_path, filename, now, old_path))
-                
-                await db.commit()
-                return result.rowcount > 0
-        except Exception as e:
-            print(f"移动元数据失败 {old_path} -> {new_path}: {e}")
-            return False
+
+    async def move_metadata_tree(self, old_path: str, new_path: str) -> None:
+        """移动路径及其子树的元数据，保持文件标签关联不变。"""
+        now = datetime.now().isoformat()
+        old_prefix = f"{old_path.rstrip('/')}/"
+        new_prefix = f"{new_path.rstrip('/')}/"
+        suffix_start = len(old_prefix) + 1
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE file_metadata SET
+                    file_path = CASE
+                        WHEN file_path = ? THEN ?
+                        ELSE ? || substr(file_path, ?)
+                    END,
+                    filename = CASE WHEN file_path = ? THEN ? ELSE filename END,
+                    updated_at = ?
+                WHERE file_path = ? OR file_path LIKE ?
+                """,
+                (
+                    old_path,
+                    new_path,
+                    new_prefix,
+                    suffix_start,
+                    old_path,
+                    os.path.basename(new_path),
+                    now,
+                    old_path,
+                    f"{old_prefix}%",
+                ),
+            )
+            await db.execute(
+                """
+                UPDATE directory_metadata SET
+                    directory_path = CASE
+                        WHEN directory_path = ? THEN ?
+                        ELSE ? || substr(directory_path, ?)
+                    END,
+                    updated_at = ?
+                WHERE directory_path = ? OR directory_path LIKE ?
+                """,
+                (
+                    old_path,
+                    new_path,
+                    new_prefix,
+                    suffix_start,
+                    now,
+                    old_path,
+                    f"{old_prefix}%",
+                ),
+            )
+            await db.commit()
     
     async def list_files_with_metadata(self, directory: str = "", 
                                      filter_public: Optional[bool] = None,
@@ -402,7 +462,7 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
             async with aiosqlite.connect(self.db_path) as db:
                 for item in dir_path.iterdir():
                     # 跳过数据库文件和其他系统文件
-                    if item.name in ['.DS_Store', 'metadata.db'] or item.name.endswith('.meta'):
+                    if item.name.startswith('.') or item.name in ['.DS_Store', 'metadata.db'] or item.name.endswith('.meta'):
                         continue
                     
                     # 计算相对路径
@@ -654,7 +714,7 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
         try:
             items = list(dir_full_path.iterdir())
             file_count = sum(1 for item in items 
-                           if item.is_file() and item.name not in ['.DS_Store', 'metadata.db'] 
+                           if item.is_file() and not item.name.startswith('.') and item.name not in ['.DS_Store', 'metadata.db']
                            and not item.name.endswith('.meta'))
             dir_count = sum(1 for item in items if item.is_dir())
             

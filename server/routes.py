@@ -61,6 +61,7 @@ from file_handlers import (
     handle_set_directory_lock,
     handle_batch_set_lock,
 )
+from file_lifecycle import FileWriteOptions, get_file_lifecycle
 from websocket import websocket_manager
 from share_manager import share_manager
 from cobalt_service import cobalt_downloader
@@ -127,50 +128,26 @@ async def perform_cobalt_download(
             download_url, progress_callback
         )
         
-        # 确保文件名唯一
-        file_path = os.path.join(storage_dir, filename)
-        counter = 1
-        base_name, ext = os.path.splitext(filename)
-        while os.path.exists(file_path):
-            filename = f"{base_name}_{counter}{ext}"
-            file_path = os.path.join(storage_dir, filename)
-            counter += 1
-        
-        # 写入文件
-        with open(file_path, 'wb') as f:
-            f.write(file_content)
-        
-        # 创建元数据
-        from metadata_config import get_metadata_manager
-        from sqlite_metadata_manager import FileMetadata
-        from utils import get_mime_type
-        import datetime
-        from config import FILE_STORAGE_PATH
-        
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        current_time = datetime.datetime.now().isoformat()
-        content_type = get_mime_type(filename)
-        
-        metadata = FileMetadata(
-            filename=filename,
-            size=len(file_content),
-            upload_time=current_time,
-            last_modified=current_time,
-            is_public=is_public,
-            content_type=content_type,
-            tags=["cobalt_download"],
-            description=f"通过Cobalt下载自: {url}",
-            created_by=token or "anonymous",
-            original_url=url
+        lifecycle = get_file_lifecycle(storage_dir)
+        filename = lifecycle.next_available_path(filename)
+        stored = await lifecycle.write_bytes(
+            filename,
+            file_content,
+            FileWriteOptions(
+                is_public=is_public,
+                created_by=token or "anonymous",
+                tags=["cobalt_download"],
+                description=f"通过Cobalt下载自: {url}",
+                original_url=url,
+            ),
         )
-        await metadata_manager.save_metadata(filename, metadata)
         
         # 发送完成通知
         await websocket_manager.notify_file_created(
             filename,
             {
                 "action": "cobalt_download",
-                "size": len(file_content),
+                "size": stored.size,
                 "is_public": is_public,
                 "url": url,
                 "task_id": task_id
@@ -599,38 +576,18 @@ def register_routes(app: FastAPI):
         # 获取用户目录
         user_dir = get_unified_storage_directory()
         
-        result = await handle_chunk_complete(filename, total_chunks, user_dir)
+        result = await handle_chunk_complete(
+            filename,
+            total_chunks,
+            user_dir,
+            is_public=is_public,
+            user_token=token,
+            tags=parsed_tags,
+            description=description,
+            notes=notes,
+        )
         
         if result.success:
-            # 合并完成后，更新文件元数据
-            from metadata_config import get_metadata_manager
-            from sqlite_metadata_manager import FileMetadata
-            from utils import get_mime_type
-            import datetime
-            from config import FILE_STORAGE_PATH
-            
-            metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-            
-            file_path = os.path.join(user_dir, filename)
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                current_time = datetime.datetime.now().isoformat()
-                content_type = get_mime_type(filename)
-                
-                metadata = FileMetadata(
-                    filename=filename,
-                    size=file_size,
-                    upload_time=current_time,
-                    last_modified=current_time,
-                    is_public=is_public,
-                    content_type=content_type,
-                    tags=parsed_tags,
-                    description=description,
-                    notes=notes,
-                    created_by=token or "anonymous"
-                )
-                await metadata_manager.save_metadata(filename, metadata)
-            
             # 发送WebSocket通知
             await websocket_manager.notify_file_created(
                 filename,
@@ -950,32 +907,24 @@ def register_routes(app: FastAPI):
         
         try:
             # 执行下载
-            result = await handle_url_download(url, filename, storage_dir, progress_callback)
+            result = await handle_url_download(
+                url,
+                filename,
+                storage_dir,
+                progress_callback,
+                FileWriteOptions(
+                    is_public=is_public,
+                    created_by=token or "anonymous",
+                    tags=parsed_tags,
+                    description=description,
+                    notes=notes,
+                    original_url=url,
+                ),
+            )
             
             if result.success and result.data:
                 final_filename = result.data.get("filename")
                 file_size = result.data.get("size", 0)
-                
-                # 更新元数据以包含用户指定的参数
-                if final_filename:
-                    from metadata_config import get_metadata_manager
-                    from config import FILE_STORAGE_PATH
-                    metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-                    
-                    # 加载现有元数据
-                    existing_metadata = await metadata_manager.load_metadata(final_filename)
-                    if existing_metadata:
-                        # 更新用户指定的字段
-                        existing_metadata.is_public = is_public
-                        existing_metadata.tags = parsed_tags
-                        existing_metadata.description = description
-                        existing_metadata.notes = notes
-                        if token:
-                            existing_metadata.created_by = token
-                        
-                        # 保存更新后的元数据
-                        await metadata_manager.save_metadata(final_filename, existing_metadata)
-                
                 # 发送完成通知
                 await websocket_manager.notify_file_created(
                     final_filename,
@@ -1159,29 +1108,26 @@ def register_routes(app: FastAPI):
             # 下载文件内容
             file_content = await cobalt_downloader.download_file_content(download_url)
             
-            # 保存到存储目录
             storage_dir = get_unified_storage_directory()
-            file_path = os.path.join(storage_dir, suggested_filename)
-            
-            # 确保文件名唯一
-            counter = 1
-            base_name, ext = os.path.splitext(suggested_filename)
-            while os.path.exists(file_path):
-                final_filename = f"{base_name}_{counter}{ext}"
-                file_path = os.path.join(storage_dir, final_filename)
-                counter += 1
-            else:
-                final_filename = suggested_filename
-            
-            # 写入文件
-            with open(file_path, 'wb') as f:
-                f.write(file_content)
+            lifecycle = get_file_lifecycle(storage_dir)
+            final_filename = lifecycle.next_available_path(suggested_filename)
+            stored = await lifecycle.write_bytes(
+                final_filename,
+                file_content,
+                FileWriteOptions(
+                    is_public=is_public,
+                    created_by=token or "anonymous",
+                    tags=["cobalt_download"],
+                    description=f"通过Cobalt下载自: {url}",
+                    original_url=url,
+                ),
+            )
             
             return {
                 "success": True,
                 "type": "saved",
                 "filename": final_filename,
-                "size": len(file_content),
+                "size": stored.size,
                 "saved_to_server": True,
                 "picker_index": picker_index
             }
@@ -1227,31 +1173,23 @@ def register_routes(app: FastAPI):
         
         try:
             # 执行内容处理
-            result = await handle_url_content_processing(url, storage_dir, progress_callback)
+            result = await handle_url_content_processing(
+                url,
+                storage_dir,
+                progress_callback,
+                FileWriteOptions(
+                    is_public=is_public,
+                    created_by=token or "anonymous",
+                    tags=parsed_tags,
+                    description=description,
+                    notes=notes,
+                    original_url=url,
+                ),
+            )
             
             if result.success and result.data:
                 final_filename = result.data.get("filename")
                 file_size = result.data.get("size", 0)
-                
-                # 更新元数据以包含用户指定的参数
-                if final_filename:
-                    from metadata_config import get_metadata_manager
-                    from config import FILE_STORAGE_PATH
-                    metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-                    
-                    # 加载现有元数据
-                    existing_metadata = await metadata_manager.load_metadata(final_filename)
-                    if existing_metadata:
-                        # 更新用户指定的字段
-                        existing_metadata.is_public = is_public
-                        existing_metadata.tags = parsed_tags
-                        existing_metadata.description = description
-                        existing_metadata.notes = notes
-                        if token:
-                            existing_metadata.created_by = token
-                        
-                        # 保存更新后的元数据
-                        await metadata_manager.save_metadata(final_filename, existing_metadata)
                 
                 # 发送完成通知
                 await websocket_manager.notify_file_created(

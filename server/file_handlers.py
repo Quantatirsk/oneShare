@@ -4,6 +4,7 @@ import hashlib
 import urllib.parse
 import re
 from datetime import datetime
+from dataclasses import replace
 from typing import Optional, List
 from fastapi import UploadFile
 import aiofiles
@@ -21,7 +22,7 @@ from utils import (
     should_display_inline, encode_filename
 )
 from metadata_config import get_metadata_manager
-from sqlite_metadata_manager import FileMetadata
+from file_lifecycle import FileLifecycleError, FileWriteOptions, get_file_lifecycle
 
 # 辅助函数
 async def _calculate_file_hash(file_path: str) -> str:
@@ -37,7 +38,7 @@ def _count_uploaded_chunks(temp_dir: str) -> int:
     if not os.path.exists(temp_dir):
         return 0
     
-    chunk_files = [f for f in os.listdir(temp_dir) if f.startswith("chunk_") and not f.endswith(".meta")]
+    chunk_files = [f for f in os.listdir(temp_dir) if re.fullmatch(r"chunk_\d+", f)]
     return len(chunk_files)
 
 
@@ -185,7 +186,7 @@ async def handle_chunk_upload(file: UploadFile, filename: str, chunk_index: int,
             print(f"分片 {chunk_index} 哈希验证成功")
         
         # 保存分片元数据
-        metadata_file = os.path.join(temp_dir, f"chunk_{chunk_index}.meta")
+        metadata_file = os.path.join(temp_dir, f"chunk-info_{chunk_index}.json")
         chunk_metadata = {
             "chunk_index": chunk_index,
             "chunk_size": chunk_size,
@@ -247,7 +248,16 @@ async def handle_chunk_upload(file: UploadFile, filename: str, chunk_index: int,
             code="CHUNK_UPLOAD_ERROR"
         )
 
-async def handle_chunk_complete(filename: str, total_chunks: int, user_dir: str) -> FileResponse:
+async def handle_chunk_complete(
+    filename: str,
+    total_chunks: int,
+    user_dir: str,
+    is_public: bool = True,
+    user_token: str = None,
+    tags: List[str] = None,
+    description: str = "",
+    notes: str = "",
+) -> FileResponse:
     """处理分片上传完成，合并文件"""
     print(f"开始处理分片合并: filename={filename}, total_chunks={total_chunks}")
     
@@ -286,44 +296,32 @@ async def handle_chunk_complete(filename: str, total_chunks: int, user_dir: str)
         temp_files = os.listdir(temp_dir)
         print(f"临时目录中的文件: {temp_files}")
         
-        # 处理文件路径，确保目录存在
-        file_path = os.path.join(user_dir, filename)
-        print(f"目标文件路径: {file_path}")
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        # 检查文件是否已存在
-        if os.path.exists(file_path):
-            print(f"错误: 文件已存在: {file_path}")
-            return FileResponse(
-                success=False,
-                error="文件已存在",
-                code="FILE_EXISTS"
-            )
-        
-        # 合并分片
-        file_size = 0
-        print(f"开始合并 {total_chunks} 个分片...")
-        async with aiofiles.open(file_path, "wb") as output_file:
+        async def merged_chunks():
             for i in range(total_chunks):
                 chunk_file = os.path.join(temp_dir, f"chunk_{i}")
                 if not os.path.exists(chunk_file):
-                    print(f"错误: 缺少分片 {i}, 路径: {chunk_file}")
-                    return FileResponse(
-                        success=False,
-                        error=f"缺少分片 {i}",
-                        code="MISSING_CHUNK"
-                    )
+                    raise FileLifecycleError("MISSING_CHUNK", f"缺少分片 {i}")
                 
                 print(f"正在处理分片 {i}: {chunk_file}")
                 async with aiofiles.open(chunk_file, "rb") as input_file:
                     while chunk := await input_file.read(512 * 1024):  # 512KB chunks
-                        await output_file.write(chunk)
-                        file_size += len(chunk)
+                        yield chunk
+
+        print(f"开始合并 {total_chunks} 个分片...")
+        stored = await get_file_lifecycle(user_dir).write_stream(
+            filename,
+            merged_chunks(),
+            FileWriteOptions(
+                is_public=is_public,
+                created_by=user_token,
+                tags=tags or [],
+                description=description,
+                notes=notes,
+            ),
+        )
+        file_size = stored.size
         
         print(f"所有分片合并完成, 总大小: {file_size} 字节")
-        
-        # 记录文件元数据
-        await save_file_metadata(file_path, filename, file_size)
         
         # 清理临时文件
         print(f"清理临时目录: {temp_dir}")
@@ -339,6 +337,8 @@ async def handle_chunk_complete(filename: str, total_chunks: int, user_dir: str)
             }
         )
     
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
         print(f"合并文件失败: {str(e)}")
         import traceback
@@ -355,143 +355,6 @@ async def handle_chunk_complete(filename: str, total_chunks: int, user_dir: str)
 
 
 
-# 元数据辅助函数
-async def save_file_metadata(file_path: str, filename: str, file_size: int):
-    """保存文件元数据"""
-    metadata = {
-        "filename": filename,
-        "size": file_size,
-        "upload_time": datetime.now().isoformat(),
-        "last_modified": datetime.now().isoformat()
-    }
-    
-    metadata_path = file_path + ".meta"
-    async with aiofiles.open(metadata_path, "w") as f:
-        await f.write(json.dumps(metadata))
-
-async def load_file_metadata(file_path: str) -> dict:
-    """加载文件元数据"""
-    metadata_path = file_path + ".meta"
-    metadata = {}
-    if os.path.exists(metadata_path):
-        try:
-            async with aiofiles.open(metadata_path, "r") as f:
-                metadata = json.loads(await f.read())
-        except:
-            pass
-    return metadata
-
-async def update_file_metadata(file_path: str, filename: str, file_size: int):
-    """更新文件元数据"""
-    metadata_path = file_path + ".meta"
-    metadata = {
-        "filename": filename,
-        "size": file_size,
-        "last_modified": datetime.now().isoformat()
-    }
-    
-    if os.path.exists(metadata_path):
-        try:
-            async with aiofiles.open(metadata_path, "r") as f:
-                old_metadata = json.loads(await f.read())
-            metadata["upload_time"] = old_metadata.get("upload_time", datetime.now().isoformat())
-        except:
-            metadata["upload_time"] = datetime.now().isoformat()
-    else:
-        metadata["upload_time"] = datetime.now().isoformat()
-    
-    async with aiofiles.open(metadata_path, "w") as f:
-        await f.write(json.dumps(metadata))
-
-async def handle_batch_delete(filenames: List[str], user_dir: str) -> FileResponse:
-    """处理批量删除"""
-    if not filenames:
-        return FileResponse(
-            success=False,
-            error="文件列表为空",
-            code="EMPTY_FILE_LIST"
-        )
-    
-    try:
-        deleted_files = []
-        failed_files = []
-        
-        for filename in filenames:
-            if not is_safe_path(filename):
-                failed_files.append({
-                    "filename": filename,
-                    "error": "非法的文件路径"
-                })
-                continue
-            
-            file_path = os.path.join(user_dir, filename)
-            
-            if not os.path.exists(file_path):
-                failed_files.append({
-                    "filename": filename,
-                    "error": "文件不存在"
-                })
-                continue
-            
-            try:
-                if os.path.isfile(file_path):
-                    # 删除文件
-                    os.remove(file_path)
-                    
-                    # 删除元数据文件（如果存在）
-                    metadata_path = file_path + ".meta"
-                    if os.path.exists(metadata_path):
-                        os.remove(metadata_path)
-                elif os.path.isdir(file_path):
-                    # 删除目录
-                    shutil.rmtree(file_path)
-                
-                deleted_files.append(filename)
-                
-            except Exception as e:
-                failed_files.append({
-                    "filename": filename,
-                    "error": str(e)
-                })
-        
-        # 构建响应
-        if deleted_files and not failed_files:
-            return FileResponse(
-                success=True,
-                message=f"成功删除 {len(deleted_files)} 个文件/目录",
-                data={
-                    "deleted": deleted_files,
-                    "total": len(filenames)
-                }
-            )
-        elif deleted_files and failed_files:
-            return FileResponse(
-                success=True,
-                message=f"成功删除 {len(deleted_files)} 个文件/目录，{len(failed_files)} 个失败",
-                data={
-                    "deleted": deleted_files,
-                    "failed": failed_files,
-                    "total": len(filenames)
-                }
-            )
-        else:
-            return FileResponse(
-                success=False,
-                error=f"所有文件删除失败",
-                code="BATCH_DELETE_ALL_FAILED",
-                data={
-                    "failed": failed_files,
-                    "total": len(filenames)
-                }
-            )
-    
-    except Exception as e:
-        return FileResponse(
-            success=False,
-            error=f"批量删除失败: {str(e)}",
-            code="BATCH_DELETE_ERROR"
-        )
-
 async def handle_unified_update(file_path: str, content: str, token: Optional[str] = None) -> FileResponse:
     """更新统一存储中的文件内容"""
     try:
@@ -506,82 +369,24 @@ async def handle_unified_update(file_path: str, content: str, token: Optional[st
                 code="INVALID_PATH"
             )
         
-        # 获取存储目录和文件路径
         storage_dir = get_unified_storage_directory()
-        full_path = os.path.join(storage_dir, file_path)
-        
-        # 检查文件是否存在
-        if not os.path.exists(full_path):
-            return FileResponse(
-                success=False,
-                error="文件不存在",
-                code="FILE_NOT_FOUND"
-            )
-        
-        # 检查权限和锁定状态
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        access = await metadata_manager.check_file_access(file_path, is_authenticated=bool(token))
-        file_metadata = access["metadata"]
-        
-        if access["reason"] == "private":
-            return FileResponse(
-                success=False,
-                error="需要认证才能编辑私有文件",
-                code="AUTHENTICATION_REQUIRED"
-            )
-        
-        if access["reason"] == "locked":
-            return FileResponse(
-                success=False,
-                error="文件已被锁定，无法编辑",
-                code="FILE_LOCKED"
-            )
-        
-        # 备份原文件
-        backup_path = full_path + ".backup"
-        try:
-            shutil.copy2(full_path, backup_path)
-        except Exception as e:
-            print(f"警告：无法创建备份文件: {str(e)}")
-        
-        # 写入新内容
-        async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
-            await f.write(content)
-        
-        # 更新元数据
-        if file_metadata:
-            file_metadata.last_modified = datetime.now().isoformat()
-            file_metadata.size = len(content.encode('utf-8'))
-            await metadata_manager.save_metadata(file_path, file_metadata)
-        
-        # 删除备份文件
-        try:
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-        except Exception as e:
-            print(f"警告：无法删除备份文件: {str(e)}")
+        stored = await get_file_lifecycle(storage_dir).replace_bytes(
+            file_path, content.encode("utf-8"), is_authenticated=bool(token)
+        )
         
         return FileResponse(
             success=True,
             message="文件内容更新成功",
             data={
                 "filename": file_path,
-                "size": len(content.encode('utf-8')),
+                "size": stored.size,
                 "modified_time": datetime.now().isoformat()
             }
         )
     
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
-        # 如果出错，尝试恢复备份
-        backup_path = os.path.join(get_unified_storage_directory(), file_path + ".backup")
-        if os.path.exists(backup_path):
-            try:
-                shutil.copy2(backup_path, os.path.join(get_unified_storage_directory(), file_path))
-                os.remove(backup_path)
-                print(f"已恢复备份文件: {file_path}")
-            except Exception as restore_e:
-                print(f"恢复备份失败: {str(restore_e)}")
-        
         return FileResponse(
             success=False,
             error=f"更新文件内容失败: {str(e)}",
@@ -679,7 +484,13 @@ async def handle_batch_download(filenames: List[str], user_dir: str):
             }
         )
 
-async def handle_url_download(url: str, filename: str, storage_dir: str, progress_callback=None):
+async def handle_url_download(
+    url: str,
+    filename: str,
+    storage_dir: str,
+    progress_callback=None,
+    write_options: Optional[FileWriteOptions] = None,
+):
     """
     从URL下载文件到服务器
     """
@@ -708,12 +519,6 @@ async def handle_url_download(url: str, filename: str, storage_dir: str, progres
                 code="UNSAFE_FILENAME"
             )
         
-        # 构建完整文件路径
-        file_path = os.path.join(storage_dir, filename)
-        
-        # 确保目录存在
-        os.makedirs(os.path.dirname(file_path) if os.path.dirname(file_path) else storage_dir, exist_ok=True)
-        
         # 使用aiohttp下载文件
         timeout = aiohttp.ClientTimeout(total=300)  # 5分钟超时
         
@@ -740,10 +545,10 @@ async def handle_url_download(url: str, filename: str, storage_dir: str, progres
                 
                 downloaded_size = 0
                 last_progress_report = 0
-                
-                async with aiofiles.open(file_path, 'wb') as f:
+
+                async def downloaded_chunks():
+                    nonlocal downloaded_size, last_progress_report
                     async for chunk in response.content.iter_chunked(UPLOAD_CHUNK_SIZE):
-                        await f.write(chunk)
                         downloaded_size += len(chunk)
                         
                         # 进度节流：只有进度增加超过1%或者间隔足够大时才报告
@@ -761,35 +566,23 @@ async def handle_url_download(url: str, filename: str, storage_dir: str, progres
                             if should_report:
                                 await progress_callback(current_progress, downloaded_size, total_size)
                                 last_progress_report = current_progress
-        
-        # 使用MetadataManager保存包含original_url的完整元数据
-        # metadata_manager已在文件顶部从metadata_config导入
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        
-        # 创建包含URL信息的元数据对象
-        metadata = FileMetadata(
-            filename=filename,
-            size=downloaded_size,
-            upload_time=datetime.now().isoformat(),
-            last_modified=datetime.now().isoformat(),
-            is_public=True,  # 默认公开，API端点会处理权限
-            content_type=response.headers.get('content-type', 'application/octet-stream'),
-            created_by=None,
-            tags=[],
-            description="",
-            notes="",
-            original_url=url
-        )
-        
-        # 保存元数据
-        await metadata_manager.save_metadata(filename, metadata)
+                        yield chunk
+
+                options = replace(
+                    write_options or FileWriteOptions(),
+                    content_type=response.headers.get("content-type", "application/octet-stream"),
+                    original_url=url,
+                )
+                stored = await get_file_lifecycle(storage_dir).write_stream(
+                    filename, downloaded_chunks(), options
+                )
         
         return FileResponse(
             success=True,
             message=f"文件 {filename} 下载成功",
             data={
                 "filename": filename,
-                "size": downloaded_size,
+                "size": stored.size,
                 "url": url,
                 "path": filename
             }
@@ -807,23 +600,21 @@ async def handle_url_download(url: str, filename: str, storage_dir: str, progres
             error="下载超时",
             code="DOWNLOAD_TIMEOUT"
         )
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
-        # 清理可能创建的文件
-        try:
-            if 'file_path' in locals() and os.path.exists(file_path):
-                os.remove(file_path)
-            if 'meta_path' in locals() and os.path.exists(meta_path):
-                os.remove(meta_path)
-        except:
-            pass
-            
         return FileResponse(
             success=False,
             error=f"下载失败: {str(e)}",
             code="DOWNLOAD_ERROR"
         )
 
-async def handle_url_content_processing(url: str, storage_dir: str, progress_callback=None):
+async def handle_url_content_processing(
+    url: str,
+    storage_dir: str,
+    progress_callback=None,
+    write_options: Optional[FileWriteOptions] = None,
+):
     """
     处理URL内容（智能内容处理）
     - 检测内容类型
@@ -934,7 +725,9 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                             await progress_callback(f"下载中: {mb_downloaded:.1f}MB")
                 
                 # 直接使用下载逻辑
-                return await handle_url_download(url, filename, storage_dir, download_progress_callback)
+                return await handle_url_download(
+                    url, filename, storage_dir, download_progress_callback, write_options
+                )
                 
             async with session.get(url) as response:
                 if response.status != 200:
@@ -985,7 +778,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                                     domain = parsed_url.hostname.replace('www.', '') if parsed_url.hostname else 'webpage'
                                     filename = f"{domain}.md"
                                 
-                                return await save_text_content(filename, markdown_content, storage_dir, url)
+                                return await save_text_content(filename, markdown_content, storage_dir, url, write_options)
                             else:
                                 # Jina AI失败，保存原始HTML
                                 html_content = await response.text()
@@ -994,7 +787,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                                     domain = parsed_url.hostname.replace('www.', '') if parsed_url.hostname else 'webpage'
                                     filename = f"{domain}.html"
                                 
-                                return await save_text_content(filename, html_content, storage_dir, url)
+                                return await save_text_content(filename, html_content, storage_dir, url, write_options)
                     except Exception as e:
                         # Jina AI请求失败，保存原始HTML
                         html_content = await response.text()
@@ -1003,7 +796,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                             domain = parsed_url.hostname.replace('www.', '') if parsed_url.hostname else 'webpage'
                             filename = f"{domain}.html"
                         
-                        return await save_text_content(filename, html_content, storage_dir, url)
+                        return await save_text_content(filename, html_content, storage_dir, url, write_options)
                 
                 elif content_type.startswith('text/') or 'json' in content_type or 'javascript' in content_type or 'xml' in content_type:
                     # 文本内容 - 直接保存
@@ -1023,7 +816,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                             timestamp = int(datetime.now().timestamp())
                             filename = f"{domain}-{timestamp}.{ext}"
                     
-                    return await save_text_content(filename, text_content, storage_dir, url)
+                    return await save_text_content(filename, text_content, storage_dir, url, write_options)
                 
                 else:
                     # 内容类型未知，根据扩展名判断
@@ -1052,7 +845,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                                 except:
                                     pass
                         
-                        return await save_text_content(filename, text_content, storage_dir, url)
+                        return await save_text_content(filename, text_content, storage_dir, url, write_options)
                     else:
                         # 既不是明确的文本也不是明确的二进制，根据内容大小判断
                         # 小文件尝试作为文本，大文件作为二进制
@@ -1071,7 +864,7 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                                     timestamp = int(datetime.now().timestamp())
                                     filename = f"{domain}-{timestamp}.txt"
                                 
-                                return await save_text_content(filename, text_content, storage_dir, url)
+                                return await save_text_content(filename, text_content, storage_dir, url, write_options)
                             except Exception:
                                 # 文本解析失败，作为二进制处理
                                 if progress_callback:
@@ -1103,7 +896,9 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
                                     await progress_callback(f"下载中: {mb_downloaded:.1f}MB")
                         
                         # 使用现有的下载逻辑
-                        return await handle_url_download(url, filename, storage_dir, download_progress_callback)
+                        return await handle_url_download(
+                            url, filename, storage_dir, download_progress_callback, write_options
+                        )
     
     except aiohttp.ClientError as e:
         return FileResponse(
@@ -1124,7 +919,13 @@ async def handle_url_content_processing(url: str, storage_dir: str, progress_cal
             code="PROCESSING_ERROR"
         )
 
-async def save_text_content(filename: str, content: str, storage_dir: str, original_url: str = None) -> FileResponse:
+async def save_text_content(
+    filename: str,
+    content: str,
+    storage_dir: str,
+    original_url: str = None,
+    write_options: Optional[FileWriteOptions] = None,
+) -> FileResponse:
     """保存文本内容到文件"""
     try:
         # 安全检查文件名
@@ -1135,52 +936,28 @@ async def save_text_content(filename: str, content: str, storage_dir: str, origi
                 code="UNSAFE_FILENAME"
             )
         
-        # 构建完整文件路径
-        file_path = os.path.join(storage_dir, filename)
-        
-        # 确保目录存在
-        os.makedirs(os.path.dirname(file_path) if os.path.dirname(file_path) else storage_dir, exist_ok=True)
-        
-        # 保存文件
-        async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-            await f.write(content)
-        
-        # 获取文件大小
-        file_size = len(content.encode('utf-8'))
-        
-        # 使用MetadataManager保存包含original_url的完整元数据
-        # metadata_manager已在文件顶部从metadata_config导入
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        
-        # 创建包含URL信息的元数据对象
-        metadata = FileMetadata(
-            filename=filename,
-            size=file_size,
-            upload_time=datetime.now().isoformat(),
-            last_modified=datetime.now().isoformat(),
-            is_public=True,
+        options = replace(
+            write_options or FileWriteOptions(),
             content_type="text/plain",
-            created_by=None,
-            tags=[],
-            description="",
-            notes="",
-            original_url=original_url
+            original_url=original_url,
         )
-        
-        # 保存元数据
-        await metadata_manager.save_metadata(filename, metadata)
+        stored = await get_file_lifecycle(storage_dir).write_bytes(
+            filename, content.encode("utf-8"), options
+        )
         
         return FileResponse(
             success=True,
             message=f"内容已保存为 {filename}",
             data={
                 "filename": filename,
-                "size": file_size,
+                "size": stored.size,
                 "type": "content",
                 "path": filename
             }
         )
         
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
         return FileResponse(
             success=False,
@@ -1267,44 +1044,22 @@ async def handle_unified_upload(file: UploadFile, filename: str, is_public: bool
         )
     
     try:
-        # 使用统一存储目录
         storage_dir = get_unified_storage_directory()
-        file_path = os.path.join(storage_dir, filename)
-        
-        # 处理文件路径，确保目录存在
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        # 检查文件是否已存在
-        if os.path.exists(file_path):
-            return FileResponse(
-                success=False,
-                error="文件已存在",
-                code="FILE_EXISTS"
-            )
-        
-        # 使用流式写入，避免将大文件加载到内存
-        file_size = 0
-        async with aiofiles.open(file_path, "wb") as f:
+        async def upload_chunks():
             while chunk := await file.read(UPLOAD_CHUNK_SIZE):
-                if file_size + len(chunk) > MAX_FILE_SIZE_BYTES:
-                    await f.close()
-                    os.remove(file_path)
-                    return FileResponse(
-                        success=False,
-                        error=f"文件大小超过限制（最大 {MAX_FILE_SIZE_MB}MB）",
-                        code="FILE_TOO_LARGE"
-                    )
-                await f.write(chunk)
-                file_size += len(chunk)
-        
-        # 创建统一元数据
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        content_type = get_mime_type(filename)
-        
-        await metadata_manager.create_metadata(
-            filename, file_size, is_public=is_public, 
-            content_type=content_type, created_by=user_token,
-            tags=tags or [], description=description, notes=notes
+                yield chunk
+
+        stored = await get_file_lifecycle(storage_dir).write_stream(
+            filename,
+            upload_chunks(),
+            FileWriteOptions(
+                is_public=is_public,
+                content_type=get_mime_type(filename),
+                created_by=user_token,
+                tags=tags or [],
+                description=description,
+                notes=notes,
+            ),
         )
         
         return FileResponse(
@@ -1312,18 +1067,14 @@ async def handle_unified_upload(file: UploadFile, filename: str, is_public: bool
             message="文件上传成功",
             data={
                 "filename": filename,
-                "size": file_size,
+                "size": stored.size,
                 "is_public": is_public
             }
         )
     
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
-        # 如果文件已经创建，删除它
-        if 'file_path' in locals() and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
         return FileResponse(
             success=False,
             error=f"上传失败: {str(e)}",
@@ -1408,63 +1159,16 @@ async def handle_unified_delete(filename: str, user_token: str = None) -> FileRe
     
     try:
         storage_dir = get_unified_storage_directory()
-        path = os.path.join(storage_dir, filename)
-        
-        if not os.path.exists(path):
-            return FileResponse(
-                success=False,
-                error="文件或目录不存在",
-                code="PATH_NOT_FOUND"
-            )
-        
-        # 检查权限和锁定状态
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        if os.path.isfile(path):
-            access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token))
-            if access["reason"] == "private":
-                return FileResponse(
-                    success=False,
-                    error="没有权限删除此文件",
-                    code="PERMISSION_DENIED"
-                )
-            if access["reason"] == "locked":
-                return FileResponse(
-                    success=False,
-                    error="文件已被锁定，无法删除",
-                    code="FILE_LOCKED"
-                )
-        elif os.path.isdir(path):
-            # 检查目录是否被锁定
-            is_locked = await metadata_manager.is_directory_locked(filename)
-            if is_locked:
-                return FileResponse(
-                    success=False,
-                    error="目录已被锁定，无法删除",
-                    code="DIRECTORY_LOCKED"
-                )
-        
-        if os.path.isfile(path):
-            # 删除文件
-            os.remove(path)
-            # 删除元数据
-            await metadata_manager.delete_metadata(filename)
-            
-            return FileResponse(
-                success=True,
-                message="文件删除成功",
-                data={"filename": filename}
-            )
-        elif os.path.isdir(path):
-            # 递归删除目录及其内容
-            import shutil
-            shutil.rmtree(path)
-            
-            return FileResponse(
-                success=True,
-                message="目录删除成功",
-                data={"dirname": filename}
-            )
-    
+        await get_file_lifecycle(storage_dir).delete(
+            filename, is_authenticated=bool(user_token)
+        )
+        return FileResponse(
+            success=True,
+            message="文件删除成功",
+            data={"filename": filename},
+        )
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
         return FileResponse(
             success=False,
@@ -1664,60 +1368,9 @@ async def handle_unified_rename(old_path: str, new_path: str, user_token: str = 
     
     try:
         storage_dir = get_unified_storage_directory()
-        old_full_path = os.path.join(storage_dir, old_path)
-        new_full_path = os.path.join(storage_dir, new_path)
-        
-        if not os.path.exists(old_full_path):
-            return FileResponse(
-                success=False,
-                error="原文件不存在",
-                code="FILE_NOT_FOUND"
-            )
-        
-        if os.path.exists(new_full_path):
-            return FileResponse(
-                success=False,
-                error="目标文件已存在",
-                code="FILE_EXISTS"
-            )
-        
-        # 检查权限和锁定状态
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
-        
-        if os.path.isfile(old_full_path):
-            access = await metadata_manager.check_file_access(old_path, is_authenticated=bool(user_token))
-            if access["reason"] == "private":
-                return FileResponse(
-                    success=False,
-                    error="没有权限重命名此文件",
-                    code="PERMISSION_DENIED"
-                )
-            if access["reason"] == "locked":
-                return FileResponse(
-                    success=False,
-                    error="文件已被锁定，无法重命名",
-                    code="FILE_LOCKED"
-                )
-        elif os.path.isdir(old_full_path):
-            # 检查目录是否被锁定
-            is_locked = await metadata_manager.is_directory_locked(old_path)
-            if is_locked:
-                return FileResponse(
-                    success=False,
-                    error="目录已被锁定，无法重命名",
-                    code="DIRECTORY_LOCKED"
-                )
-        
-        # 确保目标目录存在
-        new_dir = os.path.dirname(new_full_path)
-        if new_dir:
-            os.makedirs(new_dir, exist_ok=True)
-        
-        # 重命名文件
-        os.rename(old_full_path, new_full_path)
-        
-        # 移动元数据
-        await metadata_manager.move_metadata(old_path, new_path)
+        await get_file_lifecycle(storage_dir).move(
+            old_path, new_path, is_authenticated=bool(user_token)
+        )
         
         return FileResponse(
             success=True,
@@ -1728,6 +1381,8 @@ async def handle_unified_rename(old_path: str, new_path: str, user_token: str = 
             }
         )
     
+    except FileLifecycleError as e:
+        return FileResponse(success=False, error=str(e), code=e.code)
     except Exception as e:
         return FileResponse(
             success=False,
@@ -1798,75 +1453,17 @@ async def handle_unified_move(source_files: list, target_dir: str, user_token: s
     
     try:
         storage_dir = get_unified_storage_directory()
-        target_full_path = os.path.join(storage_dir, target_dir) if target_dir else storage_dir
-        
-        # 确保目标目录存在
-        os.makedirs(target_full_path, exist_ok=True)
-        
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
+        lifecycle = get_file_lifecycle(storage_dir)
         success_files = []
         failed_files = []
         
         for source_file in source_files:
             try:
-                if not is_safe_path(source_file):
-                    failed_files.append({
-                        "filename": source_file,
-                        "error": "非法的文件路径"
-                    })
-                    continue
-                
-                source_full_path = os.path.join(storage_dir, source_file)
-                
-                if not os.path.exists(source_full_path):
-                    failed_files.append({
-                        "filename": source_file,
-                        "error": "源文件不存在"
-                    })
-                    continue
-                
-                # 检查权限和锁定状态
-                if os.path.isfile(source_full_path):
-                    access = await metadata_manager.check_file_access(source_file, is_authenticated=bool(user_token))
-                    if access["reason"] == "private":
-                        failed_files.append({
-                            "filename": source_file,
-                            "error": "没有权限移动此文件"
-                        })
-                        continue
-                    if access["reason"] == "locked":
-                        failed_files.append({
-                            "filename": source_file,
-                            "error": "文件已被锁定，无法移动"
-                        })
-                        continue
-                elif os.path.isdir(source_full_path):
-                    # 检查目录是否被锁定
-                    is_locked = await metadata_manager.is_directory_locked(source_file)
-                    if is_locked:
-                        failed_files.append({
-                            "filename": source_file,
-                            "error": "目录已被锁定，无法移动"
-                        })
-                        continue
-                
-                # 构建目标路径
                 filename = os.path.basename(source_file)
                 target_file_path = os.path.join(target_dir, filename) if target_dir else filename
-                target_file_full_path = os.path.join(target_full_path, filename)
-                
-                if os.path.exists(target_file_full_path):
-                    failed_files.append({
-                        "filename": source_file,
-                        "error": "目标位置已存在同名文件"
-                    })
-                    continue
-                
-                # 移动文件
-                shutil.move(source_full_path, target_file_full_path)
-                
-                # 移动元数据
-                await metadata_manager.move_metadata(source_file, target_file_path)
+                await lifecycle.move(
+                    source_file, target_file_path, is_authenticated=bool(user_token)
+                )
                 
                 success_files.append({
                     "source": source_file,
@@ -1933,46 +1530,13 @@ async def handle_unified_batch_delete(filenames: list, user_token: str = None) -
     
     try:
         storage_dir = get_unified_storage_directory()
-        metadata_manager = get_metadata_manager(FILE_STORAGE_PATH)
+        lifecycle = get_file_lifecycle(storage_dir)
         success_files = []
         failed_files = []
         
         for filename in filenames:
             try:
-                if not is_safe_path(filename):
-                    failed_files.append({
-                        "filename": filename,
-                        "error": "非法的文件路径"
-                    })
-                    continue
-                
-                file_path = os.path.join(storage_dir, filename)
-                
-                if not os.path.exists(file_path):
-                    failed_files.append({
-                        "filename": filename,
-                        "error": "文件不存在"
-                    })
-                    continue
-                
-                # 检查权限
-                access = await metadata_manager.check_file_access(filename, is_authenticated=bool(user_token), check_lock=False)
-                if access["reason"] == "private":
-                    failed_files.append({
-                        "filename": filename,
-                        "error": "没有权限删除此文件"
-                    })
-                    continue
-                
-                # 删除文件或目录
-                if os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-                else:
-                    os.remove(file_path)
-                
-                # 删除元数据
-                await metadata_manager.delete_metadata(filename)
-                
+                await lifecycle.delete(filename, is_authenticated=bool(user_token))
                 success_files.append(filename)
             
             except Exception as e:
