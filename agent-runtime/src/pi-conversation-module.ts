@@ -3,6 +3,7 @@ import type { AgentSession, AgentSessionEvent } from '@earendil-works/pi-coding-
 import type { PiRuntimeConfig } from './config.js';
 import type { ModelCatalog } from './model-catalog.js';
 import { createPiSession, ModelNotAvailableError, type GenerationMessage } from './pi-provider.js';
+import type { AiRunKind, AiUsageSummary } from '../../shared/ai-conversation-contract.ts';
 
 export interface ConversationInput {
   model: string;
@@ -12,7 +13,7 @@ export interface ConversationInput {
 export interface ConversationRunInput {
   conversationId: string;
   runId: string;
-  kind: 'initial' | 'user';
+  kind: AiRunKind;
   content?: string;
 }
 
@@ -21,13 +22,7 @@ export type PiConversationEvent =
   | { type: 'delta'; text: string }
   | { type: 'completed'; usage: UsageSummary; durationMs: number };
 
-export interface UsageSummary {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-}
+export type UsageSummary = AiUsageSummary;
 
 export class ConversationNotFoundError extends Error {}
 export class ConversationBusyError extends Error {}
@@ -88,15 +83,21 @@ function usageFrom(event: AgentSessionEvent): UsageSummary | undefined {
 
 export class PiConversationModule {
   private readonly conversations = new Map<string, StoredConversation>();
+  private readonly expiryTimer: NodeJS.Timeout;
 
   public constructor(
     private readonly config: PiRuntimeConfig,
     private readonly catalog: ModelCatalog,
     private readonly sessionFactory: typeof createPiSession = createPiSession,
-  ) {}
+    private readonly now: () => number = Date.now,
+  ) {
+    const intervalMs = Math.max(1_000, Math.min(60_000, Math.floor(config.sessionTtlMs / 2)));
+    this.expiryTimer = setInterval(() => { void this.sweepExpired(); }, intervalMs);
+    this.expiryTimer.unref();
+  }
 
   public async create(input: ConversationInput): Promise<{ conversationId: string; model: string }> {
-    await this.removeExpired();
+    await this.sweepExpired();
     if (this.conversations.size >= this.config.maxActiveSessions) {
       throw new ConversationBusyError('The AI runtime has reached its active conversation limit.');
     }
@@ -115,7 +116,7 @@ export class PiConversationModule {
       session,
       initialPrompt: prompt,
       hasStarted: false,
-      lastUsedAt: Date.now(),
+      lastUsedAt: this.now(),
     });
     return { conversationId, model: input.model };
   }
@@ -126,7 +127,7 @@ export class PiConversationModule {
     if (record.activeRunId) throw new ConversationBusyError('The AI conversation is already running.');
     const prompt = this.resolvePrompt(record, input);
     record.activeRunId = input.runId;
-    record.lastUsedAt = Date.now();
+    record.lastUsedAt = this.now();
     const queue = new AsyncEventQueue<PiConversationEvent>();
     let lastUsage: UsageSummary = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
     const startedAt = performance.now();
@@ -160,7 +161,7 @@ export class PiConversationModule {
       unsubscribe();
       if (record.activeRunId === input.runId) {
         record.activeRunId = undefined;
-        record.lastUsedAt = Date.now();
+        record.lastUsedAt = this.now();
       }
     }
   }
@@ -181,7 +182,16 @@ export class PiConversationModule {
   }
 
   public async close(): Promise<void> {
+    clearInterval(this.expiryTimer);
     await Promise.all([...this.conversations.keys()].map((conversationId) => this.release(conversationId)));
+  }
+
+  public async sweepExpired(): Promise<void> {
+    const expiresBefore = this.now() - this.config.sessionTtlMs;
+    const expired = [...this.conversations.entries()]
+      .filter(([, record]) => !record.activeRunId && record.lastUsedAt < expiresBefore)
+      .map(([conversationId]) => conversationId);
+    await Promise.all(expired.map((conversationId) => this.release(conversationId)));
   }
 
   private resolvePrompt(record: StoredConversation, input: ConversationRunInput): string {
@@ -195,11 +205,4 @@ export class PiConversationModule {
     return input.content.trim();
   }
 
-  private async removeExpired(): Promise<void> {
-    const expiresBefore = Date.now() - this.config.sessionTtlMs;
-    const expired = [...this.conversations.entries()]
-      .filter(([, record]) => !record.activeRunId && record.lastUsedAt < expiresBefore)
-      .map(([conversationId]) => conversationId);
-    await Promise.all(expired.map((conversationId) => this.release(conversationId)));
-  }
 }

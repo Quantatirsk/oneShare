@@ -26,6 +26,7 @@ function conversations() {
       yield { type: 'thinking' as const, text: 'I will answer.' };
       yield { type: 'delta' as const, text: 'hello' };
       yield { type: 'completed' as const, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }, durationMs: 1 };
+      yield { type: 'delta' as const, text: 'late event' };
     },
     abort: async () => undefined,
     release: async (conversationId: string) => { released.push(conversationId); },
@@ -47,6 +48,10 @@ test('conversation routes expose model catalog, SSE run, cancellation, and relea
   assert.match(run.payload, /event: thinking/);
   assert.match(run.payload, /event: delta/);
   assert.match(run.payload, /event: completed/);
+  assert.match(run.payload, /"conversationId":"conversation-1"/);
+  assert.match(run.payload, /"runId":"run-1"/);
+  assert.equal((run.payload.match(/event: (completed|aborted|failed)/g) || []).length, 1);
+  assert.doesNotMatch(run.payload, /late event/);
   const cancelled = await app.inject({ method: 'DELETE', url: '/api/ai/conversations/conversation-1/runs/run-1' });
   assert.equal(cancelled.statusCode, 202);
   const released = await app.inject({ method: 'DELETE', url: '/api/ai/conversations/conversation-1' });

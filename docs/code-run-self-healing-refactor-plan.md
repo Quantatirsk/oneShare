@@ -90,7 +90,7 @@ POST   /api/ai/conversations/:conversationId/runs
 DELETE /api/ai/conversations/:conversationId/runs/:runId
 ```
 
-创建请求包含 `model` 和首轮所需的系统/用户意图；run 请求只包含 `kind: 'user' | 'repair'` 与文本。`repair` 只能由 `CodeRunModule` 发起，服务端仍应限制诊断长度并校验会话存在。
+创建请求包含 `model` 和首轮所需的系统/用户意图；run 请求只包含 `kind: 'initial' | 'user'` 与文本。自动修复由 `CodeRunModule` 组装为内部 `user` 消息，服务端不区分第三种 `repair` run；它仍会校验会话存在和用户消息内容。
 
 SSE 的每条事件都带 `conversationId` 与 `runId`。事件序列为：任意 `thinking` / `delta` -> `completed`，或 `aborted` / `failed`。浏览器按 `runId` 丢弃迟到事件。用户停止通过 `DELETE` 明确抵达服务器；SSE close 仍作为兜底取消链路。
 

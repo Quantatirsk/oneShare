@@ -45,6 +45,8 @@ export default defineConfig({
       '/api/ai': {
         target: process.env.VITE_AI_RUNTIME_URL || 'http://127.0.0.1:8001',
         changeOrigin: true,
+        timeout: 3_600_000,
+        proxyTimeout: 3_600_000,
       },
     },
   },

@@ -9,8 +9,17 @@ import {
   type PiConversationModule,
   RequestAbortedError,
 } from './pi-conversation-module.js';
-import { ModelNotAvailableError, type GenerationMessage } from './pi-provider.js';
+import { ModelNotAvailableError } from './pi-provider.js';
 import { startHeartbeat, startSse, writeSseEvent } from './sse.js';
+import {
+  isAiRunKind,
+  isAiRunTerminalEvent,
+  type AiConversationCreateRequest,
+  type AiConversationMessage,
+  type AiConversationRunRequest,
+  type AiRunEvent,
+  type AiRunFailure,
+} from '../../shared/ai-conversation-contract.ts';
 
 interface CreateConversationBody { model?: unknown; messages?: unknown }
 interface RunBody { runId?: unknown; kind?: unknown; content?: unknown }
@@ -19,7 +28,7 @@ interface RouteDependencies {
   conversations: PiConversationModule;
   acquire: () => (() => void) | undefined;
 }
-interface ApiFailure { code: string; message: string; retryable: boolean }
+type ApiFailure = AiRunFailure;
 
 class ApiRouteError extends Error {
   public constructor(public readonly statusCode: number, public readonly failure: ApiFailure) {
@@ -27,14 +36,14 @@ class ApiRouteError extends Error {
   }
 }
 
-function parseMessages(body: CreateConversationBody): { model: string; messages: GenerationMessage[] } {
+function parseMessages(body: CreateConversationBody): AiConversationCreateRequest {
   if (typeof body.model !== 'string' || !body.model.trim()) {
     throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'model is required.', retryable: false });
   }
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'messages must be a non-empty array.', retryable: false });
   }
-  const messages = body.messages.map((candidate): GenerationMessage => {
+  const messages = body.messages.map((candidate): AiConversationMessage => {
     if (typeof candidate !== 'object' || candidate === null) {
       throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'message must be an object.', retryable: false });
     }
@@ -51,17 +60,25 @@ function parseMessages(body: CreateConversationBody): { model: string; messages:
   return { model: body.model.trim(), messages };
 }
 
-function parseRun(body: RunBody): { runId: string; kind: 'initial' | 'user'; content?: string } {
+function parseRun(body: RunBody): AiConversationRunRequest {
   if (typeof body.runId !== 'string' || !body.runId.trim()) {
     throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'runId is required.', retryable: false });
   }
-  if (body.kind !== 'initial' && body.kind !== 'user') {
+  if (!isAiRunKind(body.kind)) {
     throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'run kind is invalid.', retryable: false });
   }
   if (body.kind === 'user' && (typeof body.content !== 'string' || !body.content.trim())) {
     throw new ApiRouteError(400, { code: 'INVALID_REQUEST', message: 'a user run needs content.', retryable: false });
   }
   return { runId: body.runId.trim(), kind: body.kind, content: typeof body.content === 'string' ? body.content : undefined };
+}
+
+function withRunIdentity(
+  event: { type: 'thinking'; text: string } | { type: 'delta'; text: string } | { type: 'completed'; usage: unknown; durationMs: number },
+  conversationId: string,
+  runId: string,
+): AiRunEvent {
+  return { ...event, conversationId, runId } as AiRunEvent;
 }
 
 function mapFailure(error: unknown): ApiRouteError {
@@ -111,7 +128,7 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
   });
 
   app.post<{ Params: { conversationId: string }; Body: RunBody }>('/api/ai/conversations/:conversationId/runs', async (request, reply) => {
-    let input: { runId: string; kind: 'initial' | 'user'; content?: string };
+    let input: AiConversationRunRequest;
     try {
       input = parseRun(request.body ?? {});
     } catch (error) {
@@ -127,15 +144,36 @@ export async function registerRoutes(app: FastifyInstance, dependencies: RouteDe
     startSse(reply.raw);
     reply.raw.once('close', abort);
     const stopHeartbeat = startHeartbeat(reply.raw);
+    let terminalSent = false;
+    const send = (event: AiRunEvent): void => {
+      if (terminalSent) return;
+      writeSseEvent(reply.raw, event);
+      terminalSent = isAiRunTerminalEvent(event);
+    };
     try {
       for await (const event of dependencies.conversations.run({ conversationId: request.params.conversationId, ...input }, abortController.signal)) {
-        writeSseEvent(reply.raw, event.type, { ...event, conversationId: request.params.conversationId, runId: input.runId });
+        send(withRunIdentity(event, request.params.conversationId, input.runId));
+      }
+      if (!terminalSent) {
+        send({
+          type: 'failed',
+          conversationId: request.params.conversationId,
+          runId: input.runId,
+          code: 'STREAM_ENDED_EARLY',
+          message: 'The AI stream ended before completion.',
+          retryable: true,
+        });
       }
     } catch (error) {
       if (error instanceof RequestAbortedError || abortController.signal.aborted) {
-        writeSseEvent(reply.raw, 'aborted', { conversationId: request.params.conversationId, runId: input.runId });
+        send({ type: 'aborted', conversationId: request.params.conversationId, runId: input.runId });
       } else {
-        writeSseEvent(reply.raw, 'failed', { ...mapFailure(error).failure, conversationId: request.params.conversationId, runId: input.runId });
+        send({
+          type: 'failed',
+          conversationId: request.params.conversationId,
+          runId: input.runId,
+          ...mapFailure(error).failure,
+        });
       }
     } finally {
       stopHeartbeat();

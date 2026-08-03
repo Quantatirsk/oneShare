@@ -1,7 +1,13 @@
-export interface AiMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+import {
+  parseAiRunEvent,
+  type AiConversationMessage,
+  type AiConversationRunRequest,
+  type AiRunEvent,
+  type AiRunFailure,
+  type AiRunKind,
+} from '../../../shared/ai-conversation-contract.ts';
+
+export type AiMessage = AiConversationMessage;
 
 export interface AiModel { id: string; name: string }
 export interface AiModelCatalog {
@@ -48,6 +54,11 @@ function newRunId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function aiRequestHeaders(json = false): Record<string, string> {
+  const requestId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return { ...(json ? { 'Content-Type': 'application/json' } : {}), 'X-Request-ID': requestId };
+}
+
 function parseSseEvent(frame: string): ParsedSseEvent | undefined {
   const lines = frame.split(/\r?\n/);
   let type = 'message';
@@ -65,9 +76,12 @@ function parseSseEvent(frame: string): ParsedSseEvent | undefined {
   catch { throw new AiRequestError('The AI stream contained invalid JSON.', 'INVALID_STREAM_EVENT', false); }
 }
 
-function eventText(data: unknown): string | undefined {
-  const text = typeof data === 'object' && data !== null ? Reflect.get(data, 'text') : undefined;
-  return typeof text === 'string' && text ? text : undefined;
+export function decodeAiRunSseEvent(frame: string): AiRunEvent | undefined {
+  const event = parseSseEvent(frame);
+  if (!event) return undefined;
+  const parsed = parseAiRunEvent(event.type, event.data);
+  if (!parsed) throw new AiRequestError('The AI stream event does not match the conversation contract.', 'INVALID_STREAM_EVENT', false);
+  return parsed;
 }
 
 export async function fetchAiModelCatalog(refresh = false): Promise<AiModelCatalog> {
@@ -75,7 +89,7 @@ export async function fetchAiModelCatalog(refresh = false): Promise<AiModelCatal
   if (!refresh && catalogPromise) return catalogPromise;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), MODEL_CATALOG_TIMEOUT_MS);
-  const request = fetch('/api/ai/models', { signal: controller.signal })
+  const request = fetch('/api/ai/models', { headers: aiRequestHeaders(), signal: controller.signal })
     .then(async (response) => {
       if (!response.ok) throw await readFailure(response, 'Unable to load AI models.');
       const catalog = (await response.json() as { data?: AiModelCatalog }).data;
@@ -99,7 +113,7 @@ export async function getDefaultAiModel(): Promise<string> { return (await fetch
 export async function createAiConversation(request: GenerateRequest, signal?: AbortSignal): Promise<AiConversation> {
   const model = request.model || await getDefaultAiModel();
   const response = await fetch('/api/ai/conversations', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+    method: 'POST', headers: aiRequestHeaders(true), signal,
     body: JSON.stringify({ model, messages: request.messages }),
   });
   if (!response.ok) throw await readFailure(response, 'The AI conversation could not be created.');
@@ -111,19 +125,20 @@ export async function createAiConversation(request: GenerateRequest, signal?: Ab
 }
 
 export async function releaseAiConversation(conversationId: string): Promise<void> {
-  await fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' });
+  await fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE', headers: aiRequestHeaders() });
 }
 
 export async function streamAiConversationRun(
   conversationId: string,
-  input: { kind: 'initial' | 'user'; content?: string; runId?: string },
+  input: { kind: AiRunKind; content?: string; runId?: string },
   handlers: GenerateStreamHandlers,
   signal?: AbortSignal,
 ): Promise<string> {
   const runId = input.runId || newRunId();
+  const request: AiConversationRunRequest = { runId, kind: input.kind, ...(input.content ? { content: input.content } : {}) };
   const response = await fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}/runs`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ ...input, runId }),
+    method: 'POST', headers: aiRequestHeaders(true), signal,
+    body: JSON.stringify(request),
   });
   if (!response.ok) throw await readFailure(response, 'The AI run could not be started.');
   if (!response.headers.get('content-type')?.includes('text/event-stream')) {
@@ -135,16 +150,17 @@ export async function streamAiConversationRun(
   let buffer = '';
   let terminal = false;
   const handleFrame = (frame: string): void => {
-    const event = parseSseEvent(frame);
+    const event = decodeAiRunSseEvent(frame);
     if (!event || terminal) return;
-    if (event.type === 'thinking') { const text = eventText(event.data); if (text) handlers.onThinkingDelta?.(text); return; }
-    if (event.type === 'delta') { const text = eventText(event.data); if (text) handlers.onDelta(text); return; }
+    if (event.conversationId !== conversationId || event.runId !== runId) return;
+    if (event.type === 'thinking') { if (event.text) handlers.onThinkingDelta?.(event.text); return; }
+    if (event.type === 'delta') { if (event.text) handlers.onDelta(event.text); return; }
     if (event.type === 'completed') { terminal = true; handlers.onCompleted?.(); return; }
     if (event.type === 'aborted') {
       terminal = true;
       throw new AiRequestError('The AI run was stopped.', 'AI_REQUEST_ABORTED', false);
     }
-    if (event.type === 'failed') { terminal = true; throw failureFromPayload(typeof event.data === 'object' && event.data ? event.data as FailurePayload : {}, 'The AI provider failed.'); }
+    if (event.type === 'failed') { terminal = true; throw failureFromPayload(event as AiRunFailure, 'The AI provider failed.'); }
   };
   try {
     while (true) {
@@ -160,7 +176,10 @@ export async function streamAiConversationRun(
     if (!terminal) throw new AiRequestError('The AI stream ended before completion.', 'STREAM_ENDED_EARLY', true);
     return runId;
   } catch (error) {
-    if (signal?.aborted) void fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
+    if (signal?.aborted) void fetch(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`,
+      { method: 'DELETE', headers: aiRequestHeaders() },
+    );
     throw error;
   }
 }
