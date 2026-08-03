@@ -1,4 +1,4 @@
-import { CodeRunModule, type RenderAdapter } from '@/lib/code-run/CodeRunModule';
+import { CodeRunModule, type CodeRunEvent, type RenderAdapter } from '@/lib/code-run/CodeRunModule';
 import { isAiRequestAborted } from '@/lib/aiClient';
 import { requirementAnalyzer, type RequirementAnalysisResult } from './RequirementAnalyzer';
 import type { RenderFailure } from '@/hooks/useCodeRenderer';
@@ -74,12 +74,12 @@ export class ConversationManager {
     const controller = this.startRequest();
     this.updateState({ stage: 'generating', currentModel: model, error: undefined, currentSession: { generatedCode: '', timestamp: new Date() } });
     try {
-      await this.codeRun.start({
+      await this.consumeCodeRunEvents(this.codeRun.start({
         model,
         language: this.state.codeLang,
         prompt: this.state.currentAnalysis.analysis,
         baseCode: currentCode || templateCode(this.state.selectedTemplate),
-      }, this.codeCallbacks(), controller.signal);
+      }, controller.signal));
       this.syncConversationId();
     } catch (error) {
       this.handleFailure(error, controller, '代码生成失败');
@@ -91,7 +91,7 @@ export class ConversationManager {
     const controller = this.startRequest();
     this.updateState({ stage: 'generating', currentRequirement: userMessage, currentModel: this.state.currentModel || model, error: undefined });
     try {
-      await this.codeRun.continue(userMessage, this.state.codeLang, this.codeCallbacks(), controller.signal);
+      await this.consumeCodeRunEvents(this.codeRun.continue(userMessage, this.state.codeLang, controller.signal));
       this.syncConversationId();
     } catch (error) {
       this.handleFailure(error, controller, '代码修改失败');
@@ -112,34 +112,37 @@ export class ConversationManager {
     return { analysisCount: this.state.currentAnalysis ? 1 : 0, conversationRounds: this.codeRun?.conversationId ? 1 : 0, codeLength: this.getCurrentCode().length, isAtLimit: false };
   }
 
-  private codeCallbacks() {
-    return {
-      onThinking: (chunk: string) => this.callbacks.onThinkingChunk?.(chunk),
-      onCodeStart: () => {
+  private async consumeCodeRunEvents(events: AsyncIterable<CodeRunEvent>): Promise<void> {
+    for await (const event of events) {
+      if (event.type === 'thinking') {
+        this.callbacks.onThinkingChunk?.(event.text);
+      } else if (event.type === 'code_started') {
         if (this.state.currentSession) this.state.currentSession.generatedCode = '';
         this.updateState({ stage: 'generating' });
-      },
-      onCodeDelta: (chunk: string) => {
-        if (this.state.currentSession) this.state.currentSession.generatedCode += chunk;
-        this.callbacks.onCodeChunk?.(chunk);
-      },
-      onValidating: () => this.updateState({ stage: 'validating' }),
-      onRepairing: (attempt: 1 | 2, failure: RenderFailure) => {
+      } else if (event.type === 'code_delta') {
+        if (this.state.currentSession) this.state.currentSession.generatedCode += event.text;
+        this.callbacks.onCodeChunk?.(event.text);
+      } else if (event.type === 'validating') {
+        this.updateState({ stage: 'validating' });
+      } else if (event.type === 'repairing') {
         this.updateState({ stage: 'repairing' });
-        this.callbacks.onRecovery?.(attempt, failure);
-      },
-      onReady: (code: string) => {
-        if (this.state.currentSession) this.state.currentSession.generatedCode = code;
+        this.callbacks.onRecovery?.(event.attempt, event.failure);
+      } else if (event.type === 'ready') {
+        if (this.state.currentSession) this.state.currentSession.generatedCode = event.code;
         this.updateState({ stage: 'completed' });
         this.callbacks.onCodeComplete?.(this.state.currentModel);
-      },
-      onExhausted: (code: string, failure: RenderFailure) => {
-        if (this.state.currentSession) this.state.currentSession.generatedCode = code;
-        this.updateState({ stage: 'completed', error: failure.message });
-        this.callbacks.onRecoveryExhausted?.(failure);
+      } else if (event.type === 'exhausted') {
+        if (this.state.currentSession) this.state.currentSession.generatedCode = event.code;
+        this.updateState({ stage: 'completed', error: event.failure.message });
+        this.callbacks.onRecoveryExhausted?.(event.failure);
         this.callbacks.onCodeComplete?.(this.state.currentModel);
-      },
-    };
+      } else if (event.type === 'aborted') {
+        this.updateState({ stage: this.hasCodeSession() ? 'completed' : 'idle', error: undefined });
+      } else if (event.type === 'failed') {
+        this.updateState({ stage: 'error', error: event.failure.message });
+        this.callbacks.onError?.(event.failure.message);
+      }
+    }
   }
 
   private startRequest(): AbortController { this.activeAbortController?.abort(); const controller = new AbortController(); this.activeAbortController = controller; return controller; }

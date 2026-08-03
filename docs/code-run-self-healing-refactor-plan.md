@@ -23,18 +23,28 @@
 新增前端 `CodeRunModule`。它的 Interface 只接受用户意图和取消信号，输出一个有序事件流；调用方不需要理解 Pi 会话、SSE、代码积累、渲染分类、两次上限或迟到事件。
 
 ```ts
+type CodeRunFailure = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  requestId?: string;
+};
+
 type CodeRunEvent =
   | { type: 'thinking'; runId: string; text: string }
+  | { type: 'code_started'; runId: string; repairAttempt: number }
   | { type: 'code_delta'; runId: string; text: string }
-  | { type: 'rendering'; runId: string }
+  | { type: 'validating'; runId: string }
   | { type: 'repairing'; runId: string; attempt: 1 | 2 }
   | { type: 'ready'; runId: string; code: string }
   | { type: 'exhausted'; runId: string; code: string; failure: RenderFailure }
   | { type: 'aborted'; runId: string }
-  | { type: 'failed'; runId: string; failure: RunFailure };
+  | { type: 'failed'; runId: string; failure: CodeRunFailure };
 
 interface CodeRunModule {
-  execute(input: CodeRunInput, signal: AbortSignal): AsyncIterable<CodeRunEvent>;
+  start(input: CodeRunInput, signal: AbortSignal): AsyncIterable<CodeRunEvent>;
+  continue(prompt: string, language: CodeLanguage, signal: AbortSignal): AsyncIterable<CodeRunEvent>;
+  reset(): Promise<void>;
 }
 ```
 
@@ -46,7 +56,7 @@ interface CodeRunModule {
 
 | Adapter | Interface | 责任 |
 | --- | --- | --- |
-| `PiConversationAdapter` | `create/open/run/abort/release` | 管理同一 `conversationId` 对应的 Pi `AgentSession`，转译 Pi 事件为领域事件。 |
+| `ConversationAdapter` | `create/run/release` | 通过 P2 会话契约管理同一 `conversationId` 对应的 Pi `AgentSession`，并转译为领域事件。 |
 | `RenderAdapter` | `validate(code, language, signal): Promise<RenderOutcome>` | 调用既有 HTML/TSX 预览能力并返回结构化结果，不吞错，也不直接决定重试。 |
 
 不要把恢复逻辑放进 Pi Extension。Extension 不知道浏览器 iframe 是否成功；此处没有需要替换的第三个实现，额外 Extension 只会增加一个浅的 Interface。

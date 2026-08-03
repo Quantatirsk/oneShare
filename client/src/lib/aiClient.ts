@@ -50,7 +50,7 @@ async function readFailure(response: Response, fallback: string): Promise<AiRequ
   catch { return new AiRequestError(`${fallback} (HTTP ${response.status})`, 'AI_REQUEST_FAILED', response.status >= 500); }
 }
 
-function newRunId(): string {
+export function createAiRunId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
@@ -134,47 +134,65 @@ export async function streamAiConversationRun(
   handlers: GenerateStreamHandlers,
   signal?: AbortSignal,
 ): Promise<string> {
-  const runId = input.runId || newRunId();
-  const request: AiConversationRunRequest = { runId, kind: input.kind, ...(input.content ? { content: input.content } : {}) };
-  const response = await fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}/runs`, {
-    method: 'POST', headers: aiRequestHeaders(true), signal,
-    body: JSON.stringify(request),
-  });
-  if (!response.ok) throw await readFailure(response, 'The AI run could not be started.');
-  if (!response.headers.get('content-type')?.includes('text/event-stream')) {
-    throw new AiRequestError('The AI server did not return an event stream.', 'INVALID_STREAM_RESPONSE', true);
+  const runId = input.runId || createAiRunId();
+  for await (const event of streamAiConversationEvents(
+    conversationId,
+    { runId, kind: input.kind, ...(input.content ? { content: input.content } : {}) },
+    signal,
+  )) {
+    if (event.type === 'thinking') { if (event.text) handlers.onThinkingDelta?.(event.text); continue; }
+    if (event.type === 'delta') { if (event.text) handlers.onDelta(event.text); continue; }
+    if (event.type === 'completed') { handlers.onCompleted?.(); continue; }
+    if (event.type === 'aborted') throw new AiRequestError('The AI run was stopped.', 'AI_REQUEST_ABORTED', false);
+    throw failureFromPayload(event as AiRunFailure, 'The AI provider failed.');
   }
-  const reader = response.body?.getReader();
-  if (!reader) throw new AiRequestError('The AI response has no readable stream.', 'INVALID_STREAM_RESPONSE', true);
-  const decoder = new TextDecoder();
-  let buffer = '';
+  return runId;
+}
+
+export async function* streamAiConversationEvents(
+  conversationId: string,
+  request: AiConversationRunRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<AiRunEvent> {
+  const { runId } = request;
   let terminal = false;
-  const handleFrame = (frame: string): void => {
+  const handleFrame = (frame: string): AiRunEvent | undefined => {
     const event = decodeAiRunSseEvent(frame);
-    if (!event || terminal) return;
-    if (event.conversationId !== conversationId || event.runId !== runId) return;
-    if (event.type === 'thinking') { if (event.text) handlers.onThinkingDelta?.(event.text); return; }
-    if (event.type === 'delta') { if (event.text) handlers.onDelta(event.text); return; }
-    if (event.type === 'completed') { terminal = true; handlers.onCompleted?.(); return; }
-    if (event.type === 'aborted') {
-      terminal = true;
-      throw new AiRequestError('The AI run was stopped.', 'AI_REQUEST_ABORTED', false);
-    }
-    if (event.type === 'failed') { terminal = true; throw failureFromPayload(event as AiRunFailure, 'The AI provider failed.'); }
+    if (!event || terminal) return undefined;
+    if (event.conversationId !== conversationId || event.runId !== runId) return undefined;
+    if (event.type === 'completed' || event.type === 'aborted' || event.type === 'failed') terminal = true;
+    return event;
   };
   try {
+    const response = await fetch(`/api/ai/conversations/${encodeURIComponent(conversationId)}/runs`, {
+      method: 'POST', headers: aiRequestHeaders(true), signal,
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw await readFailure(response, 'The AI run could not be started.');
+    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+      throw new AiRequestError('The AI server did not return an event stream.', 'INVALID_STREAM_RESPONSE', true);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new AiRequestError('The AI response has no readable stream.', 'INVALID_STREAM_RESPONSE', true);
+    const decoder = new TextDecoder();
+    let buffer = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const frames = buffer.split(/\r?\n\r?\n/);
       buffer = frames.pop() || '';
-      for (const frame of frames) handleFrame(frame);
+      for (const frame of frames) {
+        const event = handleFrame(frame);
+        if (event) yield event;
+      }
     }
     buffer += decoder.decode();
-    if (buffer.trim()) handleFrame(buffer);
+    if (buffer.trim()) {
+      const event = handleFrame(buffer);
+      if (event) yield event;
+    }
     if (!terminal) throw new AiRequestError('The AI stream ended before completion.', 'STREAM_ENDED_EARLY', true);
-    return runId;
   } catch (error) {
     if (signal?.aborted) void fetch(
       `/api/ai/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`,

@@ -1,14 +1,25 @@
 import {
+  AiRequestError,
+  createAiRunId,
   createAiConversation,
+  isAiRequestAborted,
   releaseAiConversation,
-  streamAiConversationRun,
+  streamAiConversationEvents,
   type AiConversation,
-} from '@/lib/aiClient';
-import { extractCleanCode, type CodeLanguage } from '@/utils/codeCleaningUtils';
-import type { RenderFailure, RenderOutcome } from '@/hooks/useCodeRenderer';
+  type GenerateRequest,
+} from '../aiClient.ts';
+import { extractCleanCode, type CodeLanguage } from '../../utils/codeCleaningUtils.ts';
+import type { RenderFailure, RenderOutcome } from '../../hooks/useCodeRenderer.ts';
+import type { AiConversationRunRequest, AiRunEvent } from '../../../../shared/ai-conversation-contract.ts';
 
 export interface RenderAdapter {
   validate(code: string, language: 'tsx' | 'html', signal: AbortSignal): Promise<RenderOutcome>;
+}
+
+export interface ConversationAdapter {
+  create(request: GenerateRequest, signal: AbortSignal): Promise<AiConversation>;
+  run(conversationId: string, request: AiConversationRunRequest, signal: AbortSignal): AsyncIterable<AiRunEvent>;
+  release(conversationId: string): Promise<void>;
 }
 
 export interface CodeRunInput {
@@ -18,81 +29,203 @@ export interface CodeRunInput {
   baseCode?: string;
 }
 
-export interface CodeRunCallbacks {
-  onThinking(text: string): void;
-  onCodeStart(repairAttempt: number): void;
-  onCodeDelta(text: string): void;
-  onValidating(): void;
-  onRepairing(attempt: 1 | 2, failure: RenderFailure): void;
-  onReady(code: string): void;
-  onExhausted(code: string, failure: RenderFailure): void;
+export interface CodeRunFailure {
+  code: string;
+  message: string;
+  retryable: boolean;
+  requestId?: string;
 }
+
+export type CodeRunEvent =
+  | { type: 'thinking'; runId: string; text: string }
+  | { type: 'code_started'; runId: string; repairAttempt: number }
+  | { type: 'code_delta'; runId: string; text: string }
+  | { type: 'validating'; runId: string }
+  | { type: 'repairing'; runId: string; attempt: 1 | 2; failure: RenderFailure }
+  | { type: 'ready'; runId: string; code: string }
+  | { type: 'exhausted'; runId: string; code: string; failure: RenderFailure }
+  | { type: 'aborted'; runId: string }
+  | { type: 'failed'; runId: string; failure: CodeRunFailure };
+
+const browserConversationAdapter: ConversationAdapter = {
+  create: createAiConversation,
+  run: streamAiConversationEvents,
+  release: releaseAiConversation,
+};
 
 export class CodeRunModule {
   private conversation?: AiConversation;
 
-  public constructor(private renderer: RenderAdapter) {}
+  public constructor(
+    private renderer: RenderAdapter,
+    private readonly conversations: ConversationAdapter = browserConversationAdapter,
+  ) {}
 
   public get conversationId(): string | undefined { return this.conversation?.conversationId; }
   public setRenderer(renderer: RenderAdapter): void { this.renderer = renderer; }
 
-  public async start(input: CodeRunInput, callbacks: CodeRunCallbacks, signal: AbortSignal): Promise<void> {
-    await this.reset();
-    this.conversation = await createAiConversation({
-      model: input.model,
-      messages: [
-        { role: 'system', content: buildSystemPrompt(input.language, input.baseCode) },
-        { role: 'user', content: input.prompt },
-      ],
-    }, signal);
-    await this.execute({ kind: 'initial' }, input.language, callbacks, signal, 0);
+  public async *start(input: CodeRunInput, signal: AbortSignal): AsyncGenerator<CodeRunEvent> {
+    const runId = createAiRunId();
+    try {
+      await this.reset();
+      this.conversation = await this.conversations.create({
+        model: input.model,
+        messages: [
+          { role: 'system', content: buildSystemPrompt(input.language, input.baseCode) },
+          { role: 'user', content: input.prompt },
+        ],
+      }, signal);
+    } catch (error) {
+      yield this.failureEvent(runId, error, signal);
+      return;
+    }
+    yield* this.execute({ kind: 'initial' }, input.language, signal, 0);
   }
 
-  public async continue(prompt: string, language: 'tsx' | 'html', callbacks: CodeRunCallbacks, signal: AbortSignal): Promise<void> {
+  public async *continue(
+    prompt: string,
+    language: 'tsx' | 'html',
+    signal: AbortSignal,
+  ): AsyncGenerator<CodeRunEvent> {
     if (!this.conversation) throw new Error('没有可继续的代码会话。');
-    await this.execute({ kind: 'user', content: prompt }, language, callbacks, signal, 0);
+    yield* this.execute({ kind: 'user', content: prompt }, language, signal, 0);
   }
 
   public async reset(): Promise<void> {
     const conversationId = this.conversation?.conversationId;
     this.conversation = undefined;
-    if (conversationId) await releaseAiConversation(conversationId);
+    if (conversationId) await this.conversations.release(conversationId);
   }
 
-  private async execute(
-    request: { kind: 'initial' | 'user'; content?: string },
+  private async *execute(
+    request: Omit<AiConversationRunRequest, 'runId'>,
     language: 'tsx' | 'html',
-    callbacks: CodeRunCallbacks,
     signal: AbortSignal,
     repairAttempt: number,
-  ): Promise<void> {
+  ): AsyncGenerator<CodeRunEvent> {
     if (!this.conversation) throw new Error('没有可运行的代码会话。');
-    callbacks.onCodeStart(repairAttempt);
+    const conversationId = this.conversation.conversationId;
+    const runId = createAiRunId();
+    if (signal.aborted) {
+      yield { type: 'aborted', runId };
+      return;
+    }
+    yield { type: 'code_started', runId, repairAttempt };
+    if (signal.aborted) {
+      yield { type: 'aborted', runId };
+      return;
+    }
+
     let output = '';
-    await streamAiConversationRun(this.conversation.conversationId, request, {
-      onThinkingDelta: callbacks.onThinking,
-      onDelta: (text) => {
-        output += text;
-        callbacks.onCodeDelta(text);
-      },
-    }, signal);
-    if (signal.aborted) return;
+    let completed = false;
+    try {
+      for await (const event of this.conversations.run(
+        conversationId,
+        { ...request, runId },
+        signal,
+      )) {
+        if (event.runId !== runId || event.conversationId !== conversationId) continue;
+        if (event.type === 'thinking') {
+          yield { type: 'thinking', runId, text: event.text };
+        } else if (event.type === 'delta') {
+          output += event.text;
+          yield { type: 'code_delta', runId, text: event.text };
+        } else if (event.type === 'completed') {
+          completed = true;
+        } else if (event.type === 'aborted') {
+          yield { type: 'aborted', runId };
+          return;
+        } else if (event.type === 'failed') {
+          yield {
+            type: 'failed',
+            runId,
+            failure: { code: event.code, message: event.message, retryable: event.retryable, requestId: event.requestId },
+          };
+          return;
+        }
+      }
+    } catch (error) {
+      yield this.failureEvent(runId, error, signal);
+      return;
+    }
+
+    if (signal.aborted) {
+      yield { type: 'aborted', runId };
+      return;
+    }
+    if (!completed) {
+      yield {
+        type: 'failed',
+        runId,
+        failure: { code: 'STREAM_ENDED_EARLY', message: 'AI run ended without a terminal event.', retryable: true },
+      };
+      return;
+    }
+
     const code = normalizeCode(output, language);
-    if (!code) throw new Error('模型没有返回可渲染的代码。');
-    callbacks.onValidating();
-    const outcome = await this.renderer.validate(code, language, signal);
-    if (signal.aborted) return;
+    if (!code) {
+      yield {
+        type: 'failed',
+        runId,
+        failure: { code: 'EMPTY_MODEL_OUTPUT', message: '模型没有返回可渲染的代码。', retryable: false },
+      };
+      return;
+    }
+    yield { type: 'validating', runId };
+
+    let outcome: RenderOutcome;
+    try {
+      outcome = await this.renderer.validate(code, language, signal);
+    } catch (error) {
+      yield this.failureEvent(runId, error, signal);
+      return;
+    }
+
+    if (signal.aborted) {
+      yield { type: 'aborted', runId };
+      return;
+    }
     if (outcome.ok) {
-      callbacks.onReady(code);
+      yield { type: 'ready', runId, code };
       return;
     }
-    if (outcome.failure.kind === 'infrastructure' || repairAttempt >= 2) {
-      callbacks.onExhausted(code, outcome.failure);
+    if (outcome.failure.kind === 'infrastructure') {
+      yield {
+        type: 'failed',
+        runId,
+        failure: { code: 'RENDER_INFRASTRUCTURE', message: outcome.failure.message, retryable: true },
+      };
       return;
     }
+    if (repairAttempt >= 2) {
+      yield { type: 'exhausted', runId, code, failure: outcome.failure };
+      return;
+    }
+
     const nextAttempt = (repairAttempt + 1) as 1 | 2;
-    callbacks.onRepairing(nextAttempt, outcome.failure);
-    await this.execute({ kind: 'user', content: buildRepairPrompt(code, language, outcome.failure) }, language, callbacks, signal, nextAttempt);
+    yield { type: 'repairing', runId, attempt: nextAttempt, failure: outcome.failure };
+    yield* this.execute(
+      { kind: 'user', content: buildRepairPrompt(code, language, outcome.failure) },
+      language,
+      signal,
+      nextAttempt,
+    );
+  }
+
+  private failureEvent(runId: string, error: unknown, signal: AbortSignal): CodeRunEvent {
+    if (signal.aborted || isAiRequestAborted(error)) return { type: 'aborted', runId };
+    if (error instanceof AiRequestError) {
+      return {
+        type: 'failed',
+        runId,
+        failure: { code: error.code, message: error.message, retryable: error.retryable, requestId: error.requestId },
+      };
+    }
+    return {
+      type: 'failed',
+      runId,
+      failure: { code: 'CODE_RUN_FAILED', message: error instanceof Error ? error.message : '代码生成失败。', retryable: false },
+    };
   }
 }
 
