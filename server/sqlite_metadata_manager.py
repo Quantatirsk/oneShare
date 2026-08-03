@@ -77,8 +77,6 @@ class SQLiteMetadataManager:
         # 初始化数据库
         self._init_database()
         
-        # 清理管理器（延迟初始化）
-        self._cleanup_manager = None
     
     def _init_database(self):
         """初始化数据库结构"""
@@ -766,38 +764,6 @@ CREATE INDEX IF NOT EXISTS idx_directory_metadata_public ON directory_metadata(i
         except Exception as e:
             print(f"应用锁定状态到子项目失败 {directory_path}: {e}")
     
-    async def get_cleanup_manager(self):
-        """获取清理管理器（延迟初始化）"""
-        if self._cleanup_manager is None:
-            # 延迟导入避免循环依赖
-            from metadata_cleanup_manager import MetadataCleanupManager
-            self._cleanup_manager = MetadataCleanupManager(self)
-            await self._cleanup_manager.initialize()
-        return self._cleanup_manager
-    
-    async def cleanup_orphan_metadata(self, dry_run: bool = False):
-        """清理孤儿元数据的便捷方法"""
-        cleanup_manager = await self.get_cleanup_manager()
-        return await cleanup_manager.cleanup_orphan_metadata(dry_run=dry_run)
-    
-    async def check_metadata_consistency(self):
-        """检查元数据一致性的便捷方法"""
-        cleanup_manager = await self.get_cleanup_manager()
-        return await cleanup_manager.check_consistency()
-    
-    async def start_auto_cleanup(self):
-        """启动自动清理"""
-        cleanup_manager = await self.get_cleanup_manager()
-        # 启动后台任务
-        import asyncio
-        asyncio.create_task(cleanup_manager.start_scheduled_cleanup())
-    
-    async def stop_auto_cleanup(self):
-        """停止自动清理"""
-        if self._cleanup_manager:
-            self._cleanup_manager.stop_scheduled_cleanup()
-
-
 # 全局元数据管理器实例
 _metadata_manager: Optional[SQLiteMetadataManager] = None
 
