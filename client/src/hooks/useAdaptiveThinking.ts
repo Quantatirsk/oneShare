@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getTokenCount, calculateTokenDiff } from '@/utils/tokenCounter';
+import { getTokenCount } from '@/utils/tokenCounter';
 
 interface AdaptiveThinkingState {
   // 显示控制
@@ -8,13 +8,12 @@ interface AdaptiveThinkingState {
   
   // 内容生成统计
   firstTokenTime: number | null;
-  generationSpeed: number; // token/秒
+  generationSpeed: number; // Token/秒，基于实际流式增量测量
   totalTokens: number;
   generationStartTime: number | null;
   
   // 滚动控制
   scrollSpeed: number; // px/秒
-  adaptiveScrollPosition: number;
   
   // 性能统计
   averageChunkSize: number; // token数量
@@ -26,8 +25,6 @@ interface UseAdaptiveThinkingOptions {
   content: string;
   isGenerating: boolean;
   enableAdaptive?: boolean;
-  minShowDelay?: number;
-  maxShowDelay?: number;
   baseScrollSpeed?: number;
 }
 
@@ -35,19 +32,16 @@ export function useAdaptiveThinking({
   content,
   isGenerating,
   enableAdaptive = true,
-  minShowDelay = 500,
-  maxShowDelay = 3000,
   baseScrollSpeed = 60
 }: UseAdaptiveThinkingOptions) {
   const [state, setState] = useState<AdaptiveThinkingState>({
     shouldShow: false,
-    showDelay: 2000,
+    showDelay: 0,
     firstTokenTime: null,
     generationSpeed: 0,
     totalTokens: 0,
     generationStartTime: null,
     scrollSpeed: baseScrollSpeed,
-    adaptiveScrollPosition: 0,
     averageChunkSize: 0,
     chunkCount: 0,
     responseLatency: null
@@ -57,16 +51,14 @@ export function useAdaptiveThinking({
   const prevContentRef = useRef<string>('');
   const generationTimestampsRef = useRef<number[]>([]);
   const chunkTokenSizesRef = useRef<number[]>([]);
-  const animationFrameRef = useRef<number | null>(null);
-  const showTimerRef = useRef<NodeJS.Timeout | null>(null);
   const speedUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 计算生成速度 - 使用滑动窗口计算实时token速度
+  // 基于实际到达的 token 增量计算输出速度，用于界面性能统计。
   const calculateGenerationSpeed = useCallback(() => {
     const timestamps = generationTimestampsRef.current;
-    const chunkTokenSizes = chunkTokenSizesRef.current;
+    const chunkSizes = chunkTokenSizesRef.current;
     
-    if (timestamps.length < 2 || chunkTokenSizes.length < 2) return 0;
+    if (timestamps.length < 2 || chunkSizes.length < 2) return 0;
     
     // 使用最近5秒的数据计算速度
     const now = Date.now();
@@ -80,7 +72,7 @@ export function useAdaptiveThinking({
     for (let i = timestamps.length - 1; i >= 0; i--) {
       const timestamp = timestamps[i];
       if (now - timestamp <= windowSize) {
-        totalTokens += chunkTokenSizes[i];
+        totalTokens += chunkSizes[i];
         oldestTime = Math.min(oldestTime, timestamp);
         validChunks++;
       } else {
@@ -94,20 +86,6 @@ export function useAdaptiveThinking({
     return timeSpan > 0 ? totalTokens / timeSpan : 0;
   }, []);
 
-  // 智能延迟计算
-  const calculateShowDelay = useCallback((firstTokenLatency: number): number => {
-    if (!enableAdaptive) return 2000;
-
-    // 根据首Token延迟时间动态调整显示延迟
-    if (firstTokenLatency <= 1000) {
-      return minShowDelay; // 快速响应：立即显示
-    } else if (firstTokenLatency <= 3000) {
-      return Math.min(firstTokenLatency * 0.5, 1500); // 中等响应：延迟一半时间
-    } else {
-      return Math.min(maxShowDelay, firstTokenLatency * 0.3); // 慢速响应：延迟30%时间
-    }
-  }, [enableAdaptive, minShowDelay, maxShowDelay]);
-
   // 动态滚动速度计算
   const calculateScrollSpeed = useCallback(() => {
     const currentTokenSpeed = calculateGenerationSpeed();
@@ -115,9 +93,7 @@ export function useAdaptiveThinking({
     if (currentTokenSpeed === 0) return baseScrollSpeed;
     
     // 根据token生成速度调整滚动速度
-    // token速度通常比字符速度小，所以需要调整系数
-    // 假设平均1个token ≈ 3.5个字符，调整滚动速度映射
-    const adaptedSpeed = Math.max(25, Math.min(200, currentTokenSpeed * 1.5));
+    const adaptedSpeed = Math.max(25, Math.min(200, currentTokenSpeed * 0.4));
     return adaptedSpeed;
   }, [calculateGenerationSpeed, baseScrollSpeed]);
 
@@ -126,17 +102,9 @@ export function useAdaptiveThinking({
 
   // 清理所有定时器和动画的函数
   const cleanupAll = useCallback(() => {
-    if (showTimerRef.current) {
-      clearTimeout(showTimerRef.current);
-      showTimerRef.current = null;
-    }
     if (speedUpdateTimerRef.current) {
       clearInterval(speedUpdateTimerRef.current);
       speedUpdateTimerRef.current = null;
-    }
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
     }
   }, []);
 
@@ -152,7 +120,6 @@ export function useAdaptiveThinking({
       generationSpeed: 0,
       totalTokens: 0,
       generationStartTime: Date.now(),
-      adaptiveScrollPosition: 0,
       averageChunkSize: 0,
       chunkCount: 0,
       responseLatency: null
@@ -178,8 +145,7 @@ export function useAdaptiveThinking({
         ...prev,
         shouldShow: true, // 强制保持显示
         generationSpeed: calculateGenerationSpeed(), // 计算最终速度
-        scrollSpeed: 0, // 停止滚动
-        adaptiveScrollPosition: prev.adaptiveScrollPosition // 保持当前滚动位置
+        scrollSpeed: 0 // 停止滚动
       }));
     }
   }, [isGenerating, resetState, state.generationStartTime, cleanupAll, calculateGenerationSpeed]);
@@ -194,29 +160,21 @@ export function useAdaptiveThinking({
     if (newChunkText.length > 0) {
       const now = Date.now();
       
-      // 计算新增内容的token数量
-      const newChunkTokenCount = calculateTokenDiff(prevContent, content);
+      const newChunkTokenCount = getTokenCount(newChunkText);
       
       // 记录首Token时间
       if (state.firstTokenTime === null) {
         const latency = now - state.generationStartTime;
         console.log('⚡ [AdaptiveThinking] 首Token到达，延迟:', latency, 'ms');
         
-        const showDelay = calculateShowDelay(latency);
-        console.log('📅 [AdaptiveThinking] 计算显示延迟:', showDelay, 'ms');
-        
         setState(prev => ({
           ...prev,
           firstTokenTime: now,
           responseLatency: latency,
-          showDelay
+          showDelay: 0,
+          // 真实内容到达即展示；等待态仅用于尚未收到 token 的阶段。
+          shouldShow: true,
         }));
-
-        // 设置显示定时器
-        showTimerRef.current = setTimeout(() => {
-          console.log('✨ [AdaptiveThinking] 开始显示内容');
-          setState(prev => ({ ...prev, shouldShow: true }));
-        }, showDelay);
       }
 
       // 更新统计信息
@@ -237,14 +195,16 @@ export function useAdaptiveThinking({
         chunkTokenSizesRef.current.shift();
       }
 
-      const newGenerationSpeed = calculateGenerationSpeed();
+      const measuredGenerationSpeed = calculateGenerationSpeed();
       const newScrollSpeed = calculateScrollSpeed();
       const totalTokens = getTokenCount(content);
       
       setState(prev => ({
         ...prev,
         totalTokens: totalTokens,
-        generationSpeed: newGenerationSpeed,
+        generationSpeed: prev.generationSpeed === 0
+          ? measuredGenerationSpeed
+          : prev.generationSpeed * 0.65 + measuredGenerationSpeed * 0.35,
         scrollSpeed: newScrollSpeed,
         chunkCount: prev.chunkCount + 1,
         averageChunkSize: chunkTokenSizesRef.current.reduce((a, b) => a + b, 0) / chunkTokenSizesRef.current.length
@@ -252,7 +212,7 @@ export function useAdaptiveThinking({
     }
 
     prevContentRef.current = content;
-  }, [content, isGenerating, state.generationStartTime, state.firstTokenTime, calculateShowDelay, calculateGenerationSpeed, calculateScrollSpeed]);
+  }, [content, isGenerating, state.generationStartTime, state.firstTokenTime, calculateGenerationSpeed, calculateScrollSpeed]);
 
   // 定期更新生成速度（仅在生成中且已开始显示时运行）
   useEffect(() => {
@@ -291,41 +251,6 @@ export function useAdaptiveThinking({
     };
   }, [isGenerating, state.shouldShow, state.generationStartTime, calculateGenerationSpeed, calculateScrollSpeed]);
 
-  // 自适应滚动动画（仅在生成中运行）
-  useEffect(() => {
-    if (!state.shouldShow || !isGenerating || state.scrollSpeed === 0) {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      return;
-    }
-
-    let lastTime = Date.now();
-    
-    const animate = () => {
-      const now = Date.now();
-      const deltaTime = (now - lastTime) / 1000; // 转换为秒
-      lastTime = now;
-
-      setState(prev => ({
-        ...prev,
-        adaptiveScrollPosition: prev.adaptiveScrollPosition + (prev.scrollSpeed * deltaTime)
-      }));
-
-      animationFrameRef.current = requestAnimationFrame(animate);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-    };
-  }, [state.shouldShow, isGenerating, state.scrollSpeed, state.generationStartTime]);
-
   // 清理函数
   useEffect(() => {
     return () => {
@@ -349,7 +274,6 @@ export function useAdaptiveThinking({
     showDelay: state.showDelay,
     
     // 滚动控制
-    scrollPosition: state.adaptiveScrollPosition,
     scrollSpeed: state.scrollSpeed,
     
     // 统计信息

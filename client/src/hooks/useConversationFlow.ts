@@ -22,7 +22,7 @@ export function useConversationFlow({
   renderPreview,
 }: UseConversationFlowProps) {
   const { toast } = useToast();
-  const { conversation, addMessage, updateMessage, setConversationStage, resetConversation } = useConversationState();
+  const { conversation, addMessage, updateMessage, setConversationStage, resetConversation, setStreamingThinking } = useConversationState();
   const { 
     code, 
     setCurrentCode, 
@@ -40,7 +40,9 @@ export function useConversationFlow({
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const callbacksSetRef = useRef<boolean>(false);
   const activeAnalysisRef = useRef<string | null>(null);
+  const thinkingContentRef = useRef<string>('');
   const activeThinkingRef = useRef<{ id: string; content: string } | null>(null);
+  const codeOutputStartedRef = useRef(false);
   const analysisMessagesRef = useRef<Map<string, { userMsgId: string; assistantMsgId: string }>>(new Map());
 
   useEffect(() => {
@@ -56,12 +58,19 @@ export function useConversationFlow({
     }
 
     console.log('Setting up conversationManager callbacks in useConversationFlow');
+
     conversationManager.setCallbacks({
       onStageChange: (stage) => {
         setConversationStage(stage);
 
         if (stage === 'analyzing' || stage === 'generating') {
-          activeThinkingRef.current = null;
+          codeOutputStartedRef.current = false;
+          if (activeThinkingRef.current) {
+            updateMessage(activeThinkingRef.current.id, { isStreaming: false });
+            activeThinkingRef.current = null;
+          }
+          thinkingContentRef.current = '';
+          setStreamingThinking('');
         } else if (activeThinkingRef.current) {
           updateMessage(activeThinkingRef.current.id, { isStreaming: false });
           activeThinkingRef.current = null;
@@ -132,6 +141,9 @@ export function useConversationFlow({
       },
 
       onThinkingChunk: (chunk) => {
+        // 同一轮源码已开始输出后，服务端可能仍抵达迟到的 thinking 帧；不能创建第二张思考卡片。
+        if (codeOutputStartedRef.current) return;
+
         const activeThinking = activeThinkingRef.current;
         if (!activeThinking) {
           const id = `thinking-${Date.now()}`;
@@ -145,11 +157,14 @@ export function useConversationFlow({
             isStreaming: true,
             modelId: conversationManager.getCurrentModel() || api.selectedModel,
           });
-          return;
+        } else {
+          activeThinking.content += chunk;
+          updateMessage(activeThinking.id, { content: activeThinking.content, isStreaming: true });
         }
 
-        activeThinking.content += chunk;
-        updateMessage(activeThinking.id, { content: activeThinking.content, isStreaming: true });
+        // 生成期实时容器与历史消息共享同一份累积文本。
+        thinkingContentRef.current += chunk;
+        setStreamingThinking(thinkingContentRef.current);
       },
 
       onAnalysisComplete: (analysis, modelId?: string) => {
@@ -170,8 +185,17 @@ export function useConversationFlow({
       },
 
       onCodeChunk: (chunk) => {
+        codeOutputStartedRef.current = true;
+
+        // 代码的首个 token 到达即结束本轮思考，使其作为独立历史项呈现。
+        if (activeThinkingRef.current) {
+          updateMessage(activeThinkingRef.current.id, { isStreaming: false });
+          activeThinkingRef.current = null;
+        }
+
         // 如果这是第一个chunk且accumulator为空，说明开始新的生成
         if (streamingAccumulatorRef.current === '') {
+
           setCurrentCode('');
           setLastRendered('');
           setHasPreviewContent(false);
@@ -295,13 +319,6 @@ export function useConversationFlow({
     conversationManager.setSelectedTemplate(templates.selected);
     conversationManager.setCodeLang(code.language);
   }, [templates.selected, code.language]);
-
-  // 自动滚动聊天消息到底部
-  useEffect(() => {
-    if (chatMessagesRef.current) {
-      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
-    }
-  }, [conversation.messages, conversation.stage]);
 
   // 发送消息处理函数
   const handleSendMessage = useCallback(async (message: string) => {

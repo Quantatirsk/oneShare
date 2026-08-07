@@ -74,7 +74,7 @@ export function formatPerformanceStats(stats: {
 }) {
   return {
     latencyText: stats.responseLatency ? `${stats.responseLatency}ms` : '计算中...',
-    speedText: stats.generationSpeed > 0 ? `${stats.generationSpeed.toFixed(1)} 字/秒` : '计算中...',
+    speedText: stats.generationSpeed > 0 ? `${stats.generationSpeed.toFixed(1)} Token/s` : '计算中...',
     chunkText: `${stats.totalChunks} 块数据`,
     avgChunkText: stats.averageChunkSize > 0 ? `平均 ${stats.averageChunkSize.toFixed(1)} 字/块` : '计算中...',
     scrollText: `${stats.scrollSpeed.toFixed(0)}px/秒`,

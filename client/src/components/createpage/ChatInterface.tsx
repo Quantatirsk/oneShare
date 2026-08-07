@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUp, X, Edit3, RotateCcw, Eye } from 'lucide-react';
+import { ArrowDown, ArrowUp, X, Edit3, RotateCcw, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { TEMPLATE_CATEGORIES } from '@/data/templates';
@@ -64,7 +64,28 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const { ui, setTemplateCardCollapsed } = useUIState();
   const { code, setCurrentCode, setLastRendered, setHasPreviewContent } = useCodeState();
   const { api } = useAPIState();
-  const hasStreamingCode = code.isStreaming && code.streaming.trim().length > 0;
+  // 代码生成生命周期中即挂载 ThinkingModal（点击 Generate 后立即占位，
+  // 不必等待第一个 token），由就绪占位态无缝过渡到流式滚动。
+  const isGenerationActive = conversation.stage === 'generating'
+    || conversation.stage === 'validating'
+    || conversation.stage === 'repairing';
+  // 单容器演进：思考阶段显示思考内容，代码阶段显示流式代码
+  const isCodePhase = code.isStreaming
+    || code.streaming.trim().length > 0
+    // 校验阶段已停止接收 token，但仍须保留刚完成的代码，不能回退为空的思考态。
+    || (conversation.stage === 'validating' && code.current.trim().length > 0);
+  const generationDisplayContent = isCodePhase
+    ? (code.streaming || code.current || '')
+    : conversation.streamingThinking;
+  const generationType: 'thinking' | 'code' = isCodePhase ? 'code' : 'thinking';
+  const isLiveOutput = conversation.stage === 'analyzing' || isGenerationActive;
+  const followsLatestRef = React.useRef(true);
+  const programmaticScrollRef = React.useRef(false);
+  const lastProgrammaticScrollTopRef = React.useRef<number | null>(null);
+  const scrollFrameRef = React.useRef<number | null>(null);
+  const scrollbarHideTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isFollowingLatest, setIsFollowingLatest] = useState(true);
+  const [isChatScrollbarVisible, setIsChatScrollbarVisible] = useState(false);
   
   // 调试：监控UI状态变化
   console.log('🔄 [ChatInterface] UI状态更新:', { currentlyReviewedMessageId: ui.currentlyReviewedMessageId });
@@ -92,60 +113,97 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [conversation.stage, api.selectedModel]);
   
-  // Only scroll for the code panel after the first code delta arrives.
-  React.useEffect(() => {
-    if (hasStreamingCode && chatMessagesRef.current) {
-      console.log('🔥 [ChatInterface] Starting auto scroll to bottom for ThinkingModal');
-      
-      const scrollToBottom = (retryCount = 0) => {
-        const container = chatMessagesRef.current;
-        
-        if (container) {
-          const maxScrollTop = container.scrollHeight - container.clientHeight;
-          
-          console.log('🔥 [ChatInterface] Scroll to bottom attempt', retryCount, {
-            containerScrollHeight: container.scrollHeight,
-            containerClientHeight: container.clientHeight,
-            maxScrollTop,
-            currentScrollTop: container.scrollTop
-          });
-          
-          // 滚动到最底部，让ThinkingModal显示在最下方
-          container.scrollTo({
-            top: maxScrollTop,
-            behavior: 'smooth'
-          });
-          
-          // 验证滚动结果
-          setTimeout(() => {
-            const actualScrollTop = container.scrollTop;
-            console.log('🔥 [ChatInterface] After scroll - scrollTop:', actualScrollTop);
-            console.log('🔥 [ChatInterface] Scroll to bottom success:', Math.abs(actualScrollTop - maxScrollTop) < 10);
-            
-            // 如果滚动失败，尝试强制滚动
-            if (Math.abs(actualScrollTop - maxScrollTop) > 10) {
-              console.log('🔥 [ChatInterface] Forcing immediate scroll to bottom...');
-              container.scrollTop = maxScrollTop;
-              setTimeout(() => {
-                console.log('🔥 [ChatInterface] Force scroll result:', container.scrollTop);
-              }, 100);
-            }
-          }, 500);
-          
-        } else if (retryCount < 15) {
-          // 增加重试次数，确保容器可滚动
-          console.log('🔥 [ChatInterface] Retrying scroll to bottom in 100ms...');
-          setTimeout(() => scrollToBottom(retryCount + 1), 100);
-        } else {
-          console.log('🔥 [ChatInterface] ⚠️ Failed to scroll to bottom after 15 retries');
-        }
-      };
-      
-      // 立即尝试一次，然后延迟尝试
-      scrollToBottom(0);
-      setTimeout(() => scrollToBottom(0), 300);
+  const clearScrollbarHideTimer = React.useCallback(() => {
+    if (scrollbarHideTimerRef.current) {
+      clearTimeout(scrollbarHideTimerRef.current);
+      scrollbarHideTimerRef.current = null;
     }
-  }, [hasStreamingCode]);
+  }, []);
+
+  const scheduleScrollbarHide = React.useCallback(() => {
+    clearScrollbarHideTimer();
+    scrollbarHideTimerRef.current = setTimeout(() => {
+      setIsChatScrollbarVisible(false);
+      scrollbarHideTimerRef.current = null;
+    }, 900);
+  }, [clearScrollbarHideTimer]);
+
+  const scrollToLatest = React.useCallback(() => {
+    const container = chatMessagesRef.current;
+    if (!container) return;
+
+    programmaticScrollRef.current = true;
+    const targetScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    lastProgrammaticScrollTopRef.current = targetScrollTop;
+    container.scrollTop = targetScrollTop;
+    requestAnimationFrame(() => {
+      programmaticScrollRef.current = false;
+    });
+  }, [chatMessagesRef]);
+
+  // 新一轮输出默认跟随；用户上滑后交还滚动控制权。
+  React.useEffect(() => {
+    if (!isLiveOutput) return;
+    followsLatestRef.current = true;
+    setIsFollowingLatest(true);
+    scrollFrameRef.current = requestAnimationFrame(scrollToLatest);
+    return () => {
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    };
+  }, [isLiveOutput, scrollToLatest]);
+
+  // 仅在用户仍停留底部时随流式内容追加；不使用 smooth，避免反复抢占拖拽。
+  React.useEffect(() => {
+    if (!isLiveOutput || !followsLatestRef.current) return;
+    scrollFrameRef.current = requestAnimationFrame(scrollToLatest);
+    return () => {
+      if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    };
+  }, [conversation.messages, conversation.streamingThinking, code.streaming, isLiveOutput, scrollToLatest]);
+
+  // 分析完成后，最终 spec 与操作按钮会在同一轮渲染中落位；仅此一次滚到底部。
+  React.useEffect(() => {
+    if (conversation.stage !== 'ready_to_generate') return;
+
+    followsLatestRef.current = true;
+    setIsFollowingLatest(true);
+    let secondFrame: number | null = null;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(scrollToLatest);
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
+    };
+  }, [conversation.stage, scrollToLatest]);
+
+  React.useEffect(() => () => {
+    if (scrollFrameRef.current) cancelAnimationFrame(scrollFrameRef.current);
+    clearScrollbarHideTimer();
+  }, [clearScrollbarHideTimer]);
+
+  const handleChatScroll = React.useCallback(() => {
+    const container = chatMessagesRef.current;
+    if (!container) return;
+    if (programmaticScrollRef.current
+      || (lastProgrammaticScrollTopRef.current !== null
+        && Math.abs(container.scrollTop - lastProgrammaticScrollTopRef.current) <= 0.5)) {
+      return;
+    }
+
+    const isAtBottom = container.scrollHeight - container.clientHeight - container.scrollTop <= 24;
+    followsLatestRef.current = isAtBottom;
+    setIsFollowingLatest(isAtBottom);
+    setIsChatScrollbarVisible(true);
+    scheduleScrollbarHide();
+  }, [chatMessagesRef, scheduleScrollbarHide]);
+
+  const resumeFollowingLatest = React.useCallback(() => {
+    followsLatestRef.current = true;
+    setIsFollowingLatest(true);
+    scrollToLatest();
+  }, [scrollToLatest]);
 
   const handleTemplateRemove = () => {
     setSelectedTemplate(null);
@@ -453,7 +511,22 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </AnimatePresence>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-3" ref={chatMessagesRef}>
+      <div className="relative flex-1 min-h-0">
+      <div
+        className="chat-scrollbar flex-1 h-full overflow-y-auto p-3"
+        ref={chatMessagesRef}
+        data-scrollbar-visible={isChatScrollbarVisible ? 'true' : undefined}
+        onScroll={handleChatScroll}
+        onPointerEnter={() => {
+          clearScrollbarHideTimer();
+          setIsChatScrollbarVisible(true);
+        }}
+        onPointerLeave={scheduleScrollbarHide}
+        onWheel={() => {
+          setIsChatScrollbarVisible(true);
+          scheduleScrollbarHide();
+        }}
+      >
         {conversation.messages.length === 0 ? (
           <div className="h-full flex flex-col">
             {/* 只在没有选中模板时显示提示区域 */}
@@ -603,19 +676,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 ) : (
                   <div className="w-full">
                     <div className="w-full">
-                      {message.type === 'thinking' && (
-                        <details
-                          className="rounded-md border border-sky-200 bg-sky-50/60 text-xs text-slate-700"
-                          open={message.isStreaming || undefined}
-                        >
-                          <summary className="cursor-pointer px-3 py-2 font-medium text-sky-800">
-                            {message.isStreaming ? '正在思考...' : '思考过程'}
-                          </summary>
-                          <div className="border-t border-sky-200 px-3 py-2 whitespace-pre-wrap leading-relaxed">
-                            {message.content}
-                          </div>
-                        </details>
-                      )}
 
                       {/* 分析消息使用原有的 Markdown 卡片样式 */}
                       {message.type === 'analysis' && (
@@ -624,16 +684,25 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             <div className="overview-markdown text-xs">
                               <ModernMarkdownViewer content={message.content} />
                             </div>
-                            {message.isStreaming && (
-                              <div className="flex items-center gap-1 mt-2">
-                                <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></div>
-                                <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: '0.2s'}}></div>
-                                <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: '0.4s'}}></div>
-                                <span className="text-xs text-blue-600 ml-1">分析中...</span>
-                              </div>
-                            )}
                           </div>
                         </div>
+                      )}
+
+                      {/* 分析期直接显示；代码生成期由底部唯一实时容器承载，首个代码 token 到达后再显示历史项。 */}
+                      {message.type === 'thinking' && (!message.isStreaming || !isGenerationActive) && (
+                        <ThinkingModal
+                          isVisible={true}
+                          content={message.content}
+                          title={message.isStreaming ? '正在思考' : '思考过程'}
+                          isGenerating={Boolean(message.isStreaming)}
+                          type="thinking"
+                          className="mb-2"
+                          enableSmoothScroll={false}
+                          enableAdaptive={Boolean(message.isStreaming)}
+                          showPerformanceStats={Boolean(message.isStreaming)}
+                          modelId={message.modelId}
+                          onExpandChange={setIsThinkingExpanded}
+                        />
                       )}
                       
                       {/* 代码消息的特殊处理 - 始终显示代码消息，让按钮状态能正确工作 */}
@@ -871,19 +940,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 )}
               </div>
             ))}
-            {/* Code output appears only after the first code delta; thinking renders in its own message. */}
-            {hasStreamingCode && (
+            {/* 代码生成中：点击 Generate 后立即挂载唯一的 ThinkingModal，
+                由就绪占位、思考内容到流式代码连续演进。 */}
+            {isGenerationActive && (
               <div className="space-y-3">
-                {/* 传统的生成提示 */}
-                <div className="flex justify-start">
-                  <div className="bg-muted p-3 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <LottieLoader size={20} />
-                      <span className="text-xs">正在生成代码...</span>
-                    </div>
-                  </div>
-                </div>
-                
                 {/* ThinkingModal 显示流式代码 - 使用随机动词标题 */}
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
@@ -892,10 +952,10 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 >
                   <ThinkingModal
                     isVisible={true}
-                    content={code.streaming || code.current || ''}
-                    title={code.isStreaming ? `${currentVerb}...` : "代码生成完成"}
-                    isGenerating={code.isStreaming}
-                    type="code"
+                    content={generationDisplayContent}
+                    title={isCodePhase ? `${currentVerb}...` : "正在思考"}
+                    isGenerating={isGenerationActive}
+                    type={generationType}
                     className="mb-4"
                     enableSmoothScroll={false}
                     enableAdaptive={true}
@@ -949,6 +1009,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             )}
           </div>
         )}
+      </div>
+      {!isFollowingLatest && isLiveOutput && (
+        <Button
+          type="button"
+          size="icon"
+          variant="secondary"
+          onClick={resumeFollowingLatest}
+          className="absolute bottom-4 right-4 h-8 w-8 rounded-md shadow-md"
+          title="回到最新内容"
+        >
+          <ArrowDown className="h-4 w-4" />
+        </Button>
+      )}
       </div>
 
       {/* 需求编辑对话框 */}

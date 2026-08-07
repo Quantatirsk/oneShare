@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Brain, Code, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { extractCleanCode } from '@/utils/codeCleaningUtils';
+import { preserveThinkingContent } from '@/utils/thinkingContent';
 import { useAdaptiveThinking } from '@/hooks/useAdaptiveThinking';
 import { Badge } from '@/components/ui/badge';
 
@@ -115,7 +116,7 @@ const ThinkingHeader = memo<{
             <div className="text-[10px] text-muted-foreground whitespace-nowrap">
               {performanceStats.generationSpeed > 0 && (
                 <span>
-                  {performanceStats.generationSpeed.toFixed(1)} TPS
+                  {performanceStats.generationSpeed.toFixed(1)} Token/s
                 </span>
               )}
             </div>
@@ -145,8 +146,11 @@ const ThinkingHeader = memo<{
 ThinkingHeader.displayName = 'ThinkingHeader';
 
 // 内容预处理函数 - 使用统一的代码清理工具
-const processContent = (rawContent: string): string => {
+const processContent = (rawContent: string, type: 'thinking' | 'code' | 'analysis'): string => {
   if (!rawContent) return '';
+
+  // 思考流可能包含未闭合的代码围栏或伪代码；将它交给代码提取器会丢失后续文本。
+  if (type === 'thinking') return preserveThinkingContent(rawContent);
   
   // 使用统一的代码清理工具，但保持为展示用途的配置
   return extractCleanCode(rawContent, undefined, {
@@ -158,220 +162,256 @@ const processContent = (rawContent: string): string => {
   });
 };
 
-// 分离内容组件 - 只在展开状态或内容变化时重渲染
+interface StreamSample {
+  timestamp: number;
+  characters: number;
+}
+
+interface DisplayState {
+  settled: string;
+  fadingLines: Array<{ id: number; text: string }>;
+  trailing: string;
+  trailingId: number | null;
+  nextLineId: number;
+}
+
+const INITIAL_RELEASE_CHARACTERS = 40;
+const RATE_SAMPLE_WINDOW_MS = 1_500;
+const LINE_FADE_DURATION_MS = 140;
+const MAX_TAIL_LINES = 3;
+
+const splitCompleteLines = (content: string) => {
+  const lastLineBreak = content.lastIndexOf('\n');
+  if (lastLineBreak === -1) return { lines: [] as string[], trailing: content };
+
+  return {
+    lines: content.slice(0, lastLineBreak + 1).match(/[^\n]*\n/g) ?? [],
+    trailing: content.slice(lastLineBreak + 1),
+  };
+};
+
+// 分离内容组件：接收流式缓存，再根据队列压力和实际输入速率平滑释放。
 const ThinkingContent = memo<{
   content: string;
   isExpanded: boolean;
-  scrollPosition: number;
-  enableSmoothScroll: boolean;
   isGenerating: boolean;
-  enableAdaptive: boolean;
-  adaptiveScrollPosition: number;
-  adaptiveShouldShow: boolean;
-}>(({ content, isExpanded, scrollPosition: _scrollPosition, enableSmoothScroll, isGenerating, enableAdaptive, adaptiveScrollPosition, adaptiveShouldShow }) => {
+  type: 'thinking' | 'code' | 'analysis';
+}>(({ content, isExpanded, isGenerating, type }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [contentElement, setContentElement] = useState<HTMLElement | null>(null); // 新增：使用 state 来存储内容元素引用
   const [expandedHeight, setExpandedHeight] = useState<number | null>(null);
-  const prevContentLengthRef = useRef(0);
-  
-  // 新增：响应式滚动状态
-  const [responsiveScrollPosition, setResponsiveScrollPosition] = useState(0);
-  const [containerWidth, setContainerWidth] = useState(0);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  
-  // 内容预处理和延迟显示状态
-  const [displayContent, setDisplayContent] = useState('');
-  const [smoothScrollY, setSmoothScrollY] = useState(0);
-  const [showContent, setShowContent] = useState(false);
-  const startTimeRef = useRef<number>(0);
-  const animationRef = useRef<number>(0);
-  const smoothScrollStarted = useRef(false);
+  const [displayState, setDisplayState] = useState<DisplayState>({
+    settled: '',
+    fadingLines: [],
+    trailing: '',
+    trailingId: null,
+    nextLineId: 0,
+  });
+  const receivedContentRef = useRef('');
+  const displayedLengthRef = useRef(0);
+  const sourceTypeRef = useRef(type);
+  const streamSamplesRef = useRef<StreamSample[]>([]);
+  const inputRateRef = useRef(0);
+  const releaseRateRef = useRef(0);
+  const fractionalCharactersRef = useRef(0);
+  const playbackFrameRef = useRef<number | null>(null);
+  const lastPlaybackTimestampRef = useRef<number | null>(null);
+  const followsLatestRef = useRef(true);
+  const lastProgrammaticScrollTopRef = useRef<number | null>(null);
 
-  // 新增：计算实际内容高度的函数
-  const calculateActualContentHeight = useCallback(() => {
-    if (!contentElement) return 0;
-    return contentElement.scrollHeight;
-  }, [contentElement]);
+  const processedContent = useMemo(() => processContent(content, type), [content, type]);
+  const renderedContent = isGenerating
+    ? `${displayState.settled}${displayState.fadingLines.map(({ text }) => text).join('')}${displayState.trailing}`
+    : processedContent;
 
-  // 新增：基于实际DOM测量计算滚动位置
-  const calculateResponsiveScrollPosition = useCallback(() => {
-    if (!containerRef.current || !contentElement || isExpanded) return 0;
-    
-    const containerHeight = 160; // 固定容器高度
-    const contentHeight = calculateActualContentHeight();
-    
-    // 如果内容高度小于等于容器高度，不需要滚动
-    if (contentHeight <= containerHeight) return 0;
-    
-    // 滚动到底部，显示最新内容
-    const maxScrollPosition = contentHeight - containerHeight;
-    return Math.max(0, maxScrollPosition);
-  }, [calculateActualContentHeight, contentElement, isExpanded]);
-
-  // 智能选择显示模式和滚动位置
-  const shouldShowContent = enableAdaptive ? adaptiveShouldShow : showContent;
-  
-  // 智能滚动位置选择：优先使用响应式计算，在不可用时回退到其他模式
-  const currentScrollPosition = useMemo(() => {
-    if (enableAdaptive) {
-      // 自适应模式：使用自适应滚动位置，但在容器宽度变化时可能需要调整
-      return adaptiveScrollPosition;
-    } else if (enableSmoothScroll) {
-      // 平滑滚动模式
-      return smoothScrollY;
-    } else {
-      // 响应式模式：基于实际DOM测量
-      return responsiveScrollPosition;
-    }
-  }, [enableAdaptive, enableSmoothScroll, adaptiveScrollPosition, smoothScrollY, responsiveScrollPosition]);
-  
-  // 预处理内容
-  const processedContent = useMemo(() => processContent(content), [content]);
-
-  // 新增：监听容器宽度变化
-  useEffect(() => {
-    if (!containerRef.current) return;
-    
-    // 初始化 ResizeObserver
-    resizeObserverRef.current = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const newWidth = entry.contentRect.width;
-        
-        // 宽度变化时重新计算滚动位置
-        if (newWidth !== containerWidth) {
-          setContainerWidth(newWidth);
-          
-          // 延迟重新计算，确保DOM更新完成
-          requestAnimationFrame(() => {
-            const newScrollPosition = calculateResponsiveScrollPosition();
-            setResponsiveScrollPosition(newScrollPosition);
-          });
-        }
-      }
+  const resetBuffer = useCallback((source: string, sourceType: typeof type) => {
+    const initialLength = Math.min(source.length, INITIAL_RELEASE_CHARACTERS);
+    const initialContent = source.slice(0, initialLength);
+    const { lines, trailing } = splitCompleteLines(initialContent);
+    receivedContentRef.current = source;
+    displayedLengthRef.current = initialLength;
+    sourceTypeRef.current = sourceType;
+    streamSamplesRef.current = source.length ? [{ timestamp: performance.now(), characters: source.length }] : [];
+    inputRateRef.current = 0;
+    releaseRateRef.current = 0;
+    fractionalCharactersRef.current = 0;
+    lastPlaybackTimestampRef.current = null;
+    setDisplayState((previous) => {
+      const trailingId = trailing ? previous.nextLineId : null;
+      return {
+        settled: lines.join(''),
+        fadingLines: [],
+        trailing,
+        trailingId,
+        nextLineId: trailing ? previous.nextLineId + 1 : previous.nextLineId,
+      };
     });
-    
-    resizeObserverRef.current.observe(containerRef.current);
-    
-    return () => {
-      if (resizeObserverRef.current) {
-        resizeObserverRef.current.disconnect();
-        resizeObserverRef.current = null;
-      }
-    };
-  }, [containerWidth, calculateResponsiveScrollPosition]);
+  }, []);
 
-  // 新增：内容变化时更新响应式滚动位置
-  useEffect(() => {
-    if (!enableAdaptive && !enableSmoothScroll && contentElement) {
-      // 延迟计算，确保内容渲染完成
-      const timeoutId = setTimeout(() => {
-        const newScrollPosition = calculateResponsiveScrollPosition();
-        setResponsiveScrollPosition(newScrollPosition);
-      }, 0);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [displayContent, enableAdaptive, enableSmoothScroll, calculateResponsiveScrollPosition, contentElement]);
+  const recordInput = useCallback((characters: number) => {
+    if (!characters) return;
+    const now = performance.now();
+    const samples = streamSamplesRef.current;
+    samples.push({ timestamp: now, characters });
+    const cutoff = now - RATE_SAMPLE_WINDOW_MS;
+    while (samples.length > 0 && samples[0].timestamp < cutoff) samples.shift();
 
-  // 新增：统一的滚动位置重置（生成开始时）
-  useEffect(() => {
-    if (isGenerating && !enableAdaptive) {
-      // 非自适应模式下重置滚动位置
-      setResponsiveScrollPosition(0);
-      if (!enableSmoothScroll) {
-        setSmoothScrollY(0);
-      }
-    }
-  }, [isGenerating, enableAdaptive, enableSmoothScroll]);
+    if (samples.length < 2) return;
+    const totalCharacters = samples.reduce((total, sample) => total + sample.characters, 0);
+    const durationMs = Math.max(1, now - samples[0].timestamp);
+    const measuredRate = totalCharacters / (durationMs / 1_000);
+    inputRateRef.current = inputRateRef.current === 0
+      ? measuredRate
+      : inputRateRef.current * 0.7 + measuredRate * 0.3;
+  }, []);
 
-  // 重置状态当生成开始/结束时 - 仅在非自适应模式下使用
-  useEffect(() => {
-    if (enableSmoothScroll && !enableAdaptive) {
-      if (isGenerating && !startTimeRef.current) {
-        // 生成开始时重置状态，立即显示内容
-        console.log('🎬 ThinkingModal: 开始生成，重置状态');
-        startTimeRef.current = Date.now();
-        setShowContent(true); // 立即显示内容，不再延迟
-        setDisplayContent('');
-        smoothScrollStarted.current = true; // 立即启动滚动
-        setSmoothScrollY(0);
-      } else if (!isGenerating && startTimeRef.current) {
-        // 生成结束时重置计时器，为下次生成做准备
-        console.log('🏁 ThinkingModal: 生成结束，重置计时器');
-        startTimeRef.current = 0;
-      }
-    }
-  }, [enableSmoothScroll, enableAdaptive, isGenerating]);
-
-  // 非启用模式的立即显示
-  useEffect(() => {
-    if (!enableSmoothScroll && !enableAdaptive) {
-      setShowContent(true);
-      setDisplayContent(processedContent);
-    }
-  }, [processedContent, enableSmoothScroll, enableAdaptive]);
-
-  // 内容更新和显示逻辑 - 仅在非自适应模式下使用
-  useEffect(() => {
-    if (enableAdaptive) {
-      // 自适应模式下直接显示处理后的内容
-      setDisplayContent(processedContent);
-      return;
-    }
-    
-    if (!showContent || !enableSmoothScroll) {
-      setDisplayContent(processedContent);
+  const releaseNextChunk = useCallback((timestamp: number) => {
+    const source = receivedContentRef.current;
+    const pending = source.length - displayedLengthRef.current;
+    if (pending <= 0) {
+      playbackFrameRef.current = null;
+      lastPlaybackTimestampRef.current = null;
       return;
     }
 
-    // 逐步显示内容（字符级动画）
-    if (processedContent.length > displayContent.length) {
-      const targetLength = Math.min(
-        displayContent.length + Math.ceil(processedContent.length / 100), // 每次增加1%的内容
-        processedContent.length
-      );
-      
-      const timer = setTimeout(() => {
-        setDisplayContent(processedContent.slice(0, targetLength));
-      }, 50);
+    const lastTimestamp = lastPlaybackTimestampRef.current ?? timestamp;
+    const elapsedSeconds = Math.max(0, (timestamp - lastTimestamp) / 1_000);
+    lastPlaybackTimestampRef.current = timestamp;
 
-      return () => clearTimeout(timer);
-    } else {
-      setDisplayContent(processedContent);
-    }
-  }, [processedContent, showContent, displayContent, enableSmoothScroll, enableAdaptive]);
+    // 队列越长，目标消化时间越短；实际输入速率决定基础节奏。
+    const desiredDrainSeconds = Math.max(0.1, Math.min(0.55, 0.55 - pending / 3_000));
+    const pressureRate = pending / desiredDrainSeconds;
+    const targetRate = Math.max(inputRateRef.current, pressureRate);
+    releaseRateRef.current = releaseRateRef.current === 0
+      ? targetRate
+      : releaseRateRef.current * 0.72 + targetRate * 0.28;
 
-  // 丝滑向上滚动动画引擎 - 仅在非自适应模式下使用
-  useEffect(() => {
-    if (enableAdaptive || !enableSmoothScroll || !showContent || isExpanded || !smoothScrollStarted.current) {
-      return;
-    }
+    fractionalCharactersRef.current += releaseRateRef.current * elapsedSeconds;
+    const releaseLength = Math.min(
+      pending,
+      Math.max(1, Math.floor(fractionalCharactersRef.current)),
+    );
+    fractionalCharactersRef.current -= releaseLength;
 
-    const SCROLL_SPEED = 70; // 每秒向上移动70px，降低滚动速度减少频闪
-    let lastTime = Date.now();
+    const start = displayedLengthRef.current;
+    const end = start + releaseLength;
+    displayedLengthRef.current = end;
+    setDisplayState((previous) => {
+      const hadTrailingContent = Boolean(previous.trailing);
+      const { lines, trailing } = splitCompleteLines(previous.trailing + source.slice(start, end));
+      let nextLineId = previous.nextLineId;
+      const completedLines = lines.map((text, index) => {
+        if (index === 0 && hadTrailingContent && previous.trailingId !== null) {
+          return { id: previous.trailingId, text };
+        }
 
-    const animate = () => {
-      const now = Date.now();
-      const deltaTime = (now - lastTime) / 1000; // 转换为秒
-      lastTime = now;
-
-      setSmoothScrollY(prevY => {
-        const newY = prevY + (SCROLL_SPEED * deltaTime);
-        return newY;
+        const line = { id: nextLineId, text };
+        nextLineId += 1;
+        return line;
       });
 
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animationRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      let trailingId: number | null = null;
+      if (trailing) {
+        if (lines.length === 0 && hadTrailingContent) {
+          trailingId = previous.trailingId;
+        } else {
+          trailingId = nextLineId;
+          nextLineId += 1;
+        }
       }
+
+      const nextFadingLines = [...previous.fadingLines, ...completedLines];
+      const maxFadingLines = trailing ? MAX_TAIL_LINES - 1 : MAX_TAIL_LINES;
+      const settledLineCount = Math.max(0, nextFadingLines.length - maxFadingLines);
+
+      return {
+        settled: previous.settled + nextFadingLines.slice(0, settledLineCount).map(({ text }) => text).join(''),
+        fadingLines: nextFadingLines.slice(settledLineCount),
+        trailing,
+        trailingId,
+        nextLineId,
+      };
+    });
+    playbackFrameRef.current = requestAnimationFrame(releaseNextChunk);
+  }, []);
+
+  // 每个流式事件仅追加接收缓存；视觉层由独立 RAF 消费该缓存。
+  useEffect(() => {
+    if (!isGenerating) {
+      if (playbackFrameRef.current) cancelAnimationFrame(playbackFrameRef.current);
+      playbackFrameRef.current = null;
+      receivedContentRef.current = processedContent;
+      displayedLengthRef.current = processedContent.length;
+      setDisplayState((previous) => ({
+        settled: processedContent,
+        fadingLines: [],
+        trailing: '',
+        trailingId: null,
+        nextLineId: previous.nextLineId,
+      }));
+      return;
+    }
+
+    // 首个增量时接收缓存为空，也必须初始化显示缓冲；否则 RAF 虽已排队，
+    // 卡片会一直停留在等待态，直到流结束后才改为最终文本。
+    const isNewStream = receivedContentRef.current.length === 0
+      || sourceTypeRef.current !== type
+      || !processedContent.startsWith(receivedContentRef.current);
+    if (isNewStream) {
+      resetBuffer(processedContent, type);
+    } else {
+      const receivedLength = receivedContentRef.current.length;
+      const deltaLength = processedContent.length - receivedLength;
+      if (deltaLength > 0) {
+        receivedContentRef.current = processedContent;
+        recordInput(deltaLength);
+      }
+    }
+
+    if (playbackFrameRef.current === null && receivedContentRef.current.length > displayedLengthRef.current) {
+      playbackFrameRef.current = requestAnimationFrame(releaseNextChunk);
+    }
+  }, [processedContent, isGenerating, recordInput, releaseNextChunk, resetBuffer, type]);
+
+  useEffect(() => () => {
+    if (playbackFrameRef.current) cancelAnimationFrame(playbackFrameRef.current);
+  }, []);
+
+  // 每次视觉释放后跟随真实内容底部，不引入额外像素速度。
+  useEffect(() => {
+    if (!isGenerating || isExpanded || !scrollRef.current || !followsLatestRef.current) return;
+
+    const element = scrollRef.current;
+    const frame = requestAnimationFrame(() => {
+      if (followsLatestRef.current) {
+        const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+        lastProgrammaticScrollTopRef.current = maxScrollTop;
+        element.scrollTop = maxScrollTop;
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
     };
-  }, [enableAdaptive, enableSmoothScroll, showContent, isExpanded, smoothScrollStarted.current]);
+  }, [displayState, isGenerating, isExpanded]);
+
+  useEffect(() => {
+    followsLatestRef.current = true;
+    if (scrollRef.current) {
+      lastProgrammaticScrollTopRef.current = 0;
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [isGenerating, type]);
+
+  const handleScroll = useCallback(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if (lastProgrammaticScrollTopRef.current !== null
+      && Math.abs(element.scrollTop - lastProgrammaticScrollTopRef.current) <= 0.5) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop;
+    followsLatestRef.current = distanceFromBottom <= 8;
+  }, []);
 
   // 监听展开状态变化，记录完全展开时的高度
   useEffect(() => {
@@ -384,19 +424,43 @@ const ThinkingContent = memo<{
         }
       }, 0);
     }
-  }, [isExpanded, displayContent]);
+  }, [isExpanded, renderedContent]);
 
   // 展开状态下自动滚动到底部
   useEffect(() => {
-    if (isExpanded && scrollRef.current && displayContent.length > prevContentLengthRef.current) {
+    if (isExpanded && scrollRef.current) {
       const scrollElement = scrollRef.current;
-      // 使用 requestAnimationFrame 确保DOM更新后再滚动
       requestAnimationFrame(() => {
         scrollElement.scrollTop = scrollElement.scrollHeight;
       });
     }
-    prevContentLengthRef.current = displayContent.length;
-  }, [displayContent, isExpanded]);
+  }, [renderedContent, isExpanded]);
+
+  const contentNode = isGenerating ? (
+    <>
+      {displayState.settled}
+      {displayState.fadingLines.map(({ id, text }) => (
+        <motion.span
+          key={id}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: LINE_FADE_DURATION_MS / 1_000, ease: 'linear' }}
+        >
+          {text}
+        </motion.span>
+      ))}
+      {displayState.trailing && (
+        <motion.span
+          key={displayState.trailingId}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.7 }}
+          transition={{ duration: LINE_FADE_DURATION_MS / 1_000, ease: 'linear' }}
+        >
+          {displayState.trailing}
+        </motion.span>
+      )}
+    </>
+  ) : renderedContent;
 
   return (
     <motion.div 
@@ -424,12 +488,10 @@ const ThinkingContent = memo<{
       {/* 内容容器 */}
       <div 
         ref={scrollRef}
-        className={isExpanded ? "p-4 max-h-96 overflow-y-auto" : "absolute inset-0 p-4"}
-        style={!isExpanded ? {
-          transform: `translateY(-${currentScrollPosition}px)`
-        } : undefined}
+        onScroll={handleScroll}
+        className={isExpanded ? "p-4 max-h-96 overflow-y-auto" : "absolute inset-0 overflow-y-auto p-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"}
       >
-        {!shouldShowContent && (enableSmoothScroll || enableAdaptive) ? (
+        {!renderedContent && isGenerating ? (
           <div className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px] flex items-center justify-center">
             <div className="text-center">
               <div className="mb-2">⏳</div>
@@ -437,18 +499,12 @@ const ThinkingContent = memo<{
             </div>
           </div>
         ) : isExpanded ? (
-          <pre 
-            ref={setContentElement}
-            className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]"
-          >
-            {displayContent || ''}
+          <pre className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]">
+            {contentNode}
           </pre>
         ) : (
-          <div 
-            ref={setContentElement}
-            className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]"
-          >
-            {displayContent || ''}
+          <div className="text-[10px] text-muted-foreground leading-relaxed whitespace-pre-wrap font-mono min-h-[120px]">
+            {contentNode}
           </div>
         )}
       </div>
@@ -466,22 +522,16 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
   type = 'thinking',
   onExpandChange,
   className,
-  enableSmoothScroll = false,
   enableAdaptive = true,
   showPerformanceStats = false,
   modelId
 }) => {
   const [seconds, setSeconds] = useState(0);
-  const [scrollPosition, setScrollPosition] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // 使用自适应thinking hook（增强版，支持容器尺寸感知）
-  const {
-    shouldShow: adaptiveShouldShow,
-    scrollPosition: adaptiveScrollPosition,
-    getPerformanceStats
-  } = useAdaptiveThinking({
+  const { getPerformanceStats } = useAdaptiveThinking({
     content,
     isGenerating,
     enableAdaptive,
@@ -524,37 +574,10 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
     };
   }, [isGenerating, isVisible]);
 
-  // 流式内容显示和滚动 - 仅处理收起状态
-  // 注意：此逻辑现在主要用于非自适应模式，自适应模式在 ThinkingContent 中处理
-  const prevContentRef = useRef('');
-  
-  useEffect(() => {
-    if (!isGenerating || isExpanded || !content || !isVisible || enableAdaptive) return;
-    
-    // 只在内容增加时才滚动
-    if (content.length > prevContentRef.current.length) {
-      // 备用滚动逻辑：如果 DOM 测量不可用，回退到估算方法
-      const lines = content.split('\n');
-      const containerHeight = 160;
-      const estimatedLineHeight = 14; // 更精确的行高估算（基于 text-[10px] 和 leading-relaxed）
-      const visibleLines = Math.floor(containerHeight / estimatedLineHeight);
-      
-      // 如果内容超出可视区域，滚动到最新内容
-      if (lines.length > visibleLines) {
-        const targetScrollPosition = (lines.length - visibleLines) * estimatedLineHeight;
-        setScrollPosition(targetScrollPosition);
-      }
-    }
-    
-    prevContentRef.current = content;
-  }, [content, isGenerating, isExpanded, isVisible, enableAdaptive]);
-
   // 组件初始化或重新显示时重置状态 - 只对生成中的modal重置
   useEffect(() => {
     if (isVisible && isGenerating) {
-      setScrollPosition(0);
       setSeconds(0);
-      prevContentRef.current = '';
       setIsExpanded(false); // 重置展开状态
     }
   }, [isVisible, isGenerating]);
@@ -605,12 +628,8 @@ const ThinkingModal: React.FC<ThinkingModalProps> = ({
         <ThinkingContent
           content={content}
           isExpanded={isExpanded}
-          scrollPosition={scrollPosition}
-          enableSmoothScroll={enableSmoothScroll}
           isGenerating={isGenerating}
-          enableAdaptive={enableAdaptive}
-          adaptiveScrollPosition={adaptiveScrollPosition}
-          adaptiveShouldShow={adaptiveShouldShow}
+          type={type}
         />
       </div>
     </motion.div>

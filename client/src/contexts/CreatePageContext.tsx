@@ -42,6 +42,7 @@ export interface CreatePageState {
     messages: Message[];
     inputText: string;
     selectedPrompt: string;
+    streamingThinking: string;
   };
 
   // 代码层状态
@@ -96,6 +97,7 @@ export type CreatePageAction =
   | { type: 'CONVERSATION_SET_MESSAGES'; payload: Message[] }
   | { type: 'CONVERSATION_SET_INPUT_TEXT'; payload: string }
   | { type: 'CONVERSATION_SET_SELECTED_PROMPT'; payload: string }
+  | { type: 'CONVERSATION_SET_STREAMING_THINKING'; payload: string }
   | { type: 'CONVERSATION_RESET'; }
   
   // Code Actions
@@ -145,6 +147,7 @@ const initialState: CreatePageState = {
     messages: [],
     inputText: '',
     selectedPrompt: '',
+    streamingThinking: '',
   },
   code: {
     current: '',
@@ -250,10 +253,13 @@ function createPageReducer(state: CreatePageState, action: CreatePageAction): Cr
     case 'CONVERSATION_SET_SELECTED_PROMPT':
       return { ...state, conversation: { ...state.conversation, selectedPrompt: action.payload } };
     
+    case 'CONVERSATION_SET_STREAMING_THINKING':
+      return { ...state, conversation: { ...state.conversation, streamingThinking: action.payload } };
+
     case 'CONVERSATION_RESET':
       return {
         ...state,
-        conversation: { stage: 'idle', messages: [], inputText: '', selectedPrompt: '' },
+        conversation: { stage: 'idle', messages: [], inputText: '', selectedPrompt: '', streamingThinking: '' },
         code: { ...state.code, current: '', fileName: '', hasPreviewContent: false },
         templates: { ...state.templates, selected: null },
       };
@@ -383,6 +389,7 @@ interface CreatePageActions {
   setMessages: (messages: Message[]) => void;
   setInputText: (text: string) => void;
   setSelectedPrompt: (prompt: string) => void;
+  setStreamingThinking: (thinking: string) => void;
   resetConversation: () => void;
   
   // Code Actions
@@ -448,6 +455,7 @@ export const CreatePageProvider: React.FC<CreatePageProviderProps> = ({ children
     setMessages: (messages) => dispatch({ type: 'CONVERSATION_SET_MESSAGES', payload: messages }),
     setInputText: (text) => dispatch({ type: 'CONVERSATION_SET_INPUT_TEXT', payload: text }),
     setSelectedPrompt: (prompt: string) => dispatch({ type: 'CONVERSATION_SET_SELECTED_PROMPT', payload: prompt }),
+    setStreamingThinking: (thinking: string) => dispatch({ type: 'CONVERSATION_SET_STREAMING_THINKING', payload: thinking }),
     resetConversation: () => dispatch({ type: 'CONVERSATION_RESET' }),
     
     // Code Actions
@@ -536,6 +544,7 @@ export const useConversationState = () => {
     setMessages: actions.setMessages,
     setInputText: actions.setInputText,
     setSelectedPrompt: actions.setSelectedPrompt,
+    setStreamingThinking: actions.setStreamingThinking,
     resetConversation: actions.resetConversation,
   };
 };

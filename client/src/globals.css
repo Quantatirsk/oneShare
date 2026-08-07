@@ -117,6 +117,31 @@
     display: none;  /* Chrome, Safari and Opera */
   }
 
+  .chat-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .chat-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .chat-scrollbar[data-scrollbar-visible='true'] {
+    scrollbar-width: thin;
+  }
+
+  .chat-scrollbar[data-scrollbar-visible='true']::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .chat-scrollbar[data-scrollbar-visible='true']::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.45);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
   /* Mobile optimizations */
   @media (max-width: 640px) {
     .line-clamp-2 {
