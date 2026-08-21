@@ -7,6 +7,7 @@ RUN npm ci
 # 构建阶段 - 前端构建
 FROM frontend-deps AS frontend-builder
 COPY client/ .
+COPY shared/ /shared/
 RUN npm run build
 RUN ls -la dist/
 
@@ -20,6 +21,8 @@ WORKDIR /app
 COPY agent-runtime/package.json agent-runtime/package-lock.json ./
 RUN npm ci
 COPY agent-runtime/ .
+# The bundled runtime imports the repository-level conversation contract.
+COPY shared/ /shared/
 RUN npm run build
 
 # 构建阶段 - 后端依赖

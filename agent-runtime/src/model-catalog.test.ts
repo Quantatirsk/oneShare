@@ -11,6 +11,7 @@ const config: PiRuntimeConfig = {
   providerApiKey: 'test-key',
   defaultModel: 'model-b',
   temperature: 0.6,
+  maxTokens: 0,
   requestTimeoutMs: 1_000,
   maxRetries: 1,
   maxConcurrency: 1,

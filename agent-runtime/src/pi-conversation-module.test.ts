@@ -6,7 +6,7 @@ import { PiConversationModule } from './pi-conversation-module.js';
 
 const config: PiRuntimeConfig = {
   host: '127.0.0.1', port: 8001, providerId: 'test-provider', providerBaseUrl: 'https://example.test/v1', providerApiKey: 'test-key',
-  defaultModel: 'model-a', temperature: 0.6, requestTimeoutMs: 1_000, maxRetries: 0, maxConcurrency: 1,
+  defaultModel: 'model-a', temperature: 0.6, maxTokens: 0, requestTimeoutMs: 1_000, maxRetries: 0, maxConcurrency: 1,
   modelCatalogTtlMs: 60_000, modelCatalogRefreshTimeoutMs: 1_000, sessionTtlMs: 60_000, maxActiveSessions: 4, workDir: process.cwd(),
 };
 

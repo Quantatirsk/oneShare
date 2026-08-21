@@ -6,6 +6,7 @@ export interface PiRuntimeConfig {
   providerApiKey: string;
   defaultModel: string;
   temperature: number;
+  maxTokens: number;
   requestTimeoutMs: number;
   maxRetries: number;
   maxConcurrency: number;
@@ -65,6 +66,7 @@ export function loadConfig(environ: NodeJS.ProcessEnv = process.env): PiRuntimeC
     providerApiKey: required(environ, 'PI_PROVIDER_API_KEY'),
     defaultModel: required(environ, 'PI_DEFAULT_MODEL'),
     temperature: decimal(environ, 'PI_TEMPERATURE', 0.6),
+    maxTokens: integer(environ, 'PI_MAX_TOKENS', 0),
     requestTimeoutMs: integer(environ, 'PI_REQUEST_TIMEOUT_MS', 300_000),
     maxRetries: integer(environ, 'PI_MAX_RETRIES', 1),
     maxConcurrency: integer(environ, 'PI_MAX_CONCURRENCY', 8),
