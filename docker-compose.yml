@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: harbor.vect.one/quantatrisk/file-server:1.0
+    image: quantatrisk/file-server:latest
     container_name: file-server
     # privileged: true
     ports:
